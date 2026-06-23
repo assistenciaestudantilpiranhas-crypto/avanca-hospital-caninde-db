@@ -1,0 +1,5 @@
+superpowers/
+claude-code/
+.claude/
+node_modules/
+*.log

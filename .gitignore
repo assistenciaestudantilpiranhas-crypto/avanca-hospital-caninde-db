@@ -1,0 +1,8 @@
+superpowers/
+claude-code/
+.claude/
+node_modules/
+.netlify/
+dist/
+build/
+*.log

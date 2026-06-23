@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Protótipo visual do sistema web hospitalar GSI Saúde.">
+  <title>GSI Saúde | Gestão Hospitalar</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Menu principal">
+      <div class="brand">
+        <span class="brand-mark">GS</span>
+        <div>
+          <strong>GSI Saúde</strong>
+          <small>Gestão hospitalar integrada</small>
+        </div>
+      </div>
+
+      <div class="sidebar-status">
+        <span class="demo-badge">Ambiente demonstrativo</span>
+        <strong style="margin-top:8px">Fluxo assistencial integrado</strong>
+      </div>
+
+      <nav class="side-nav" id="sideNav"></nav>
+
+      <div class="user-card">
+        <span class="avatar">EG</span>
+        <div>
+          <strong>Erick José Gomes da Silva</strong>
+          <small>Gestor Público<br>Auditoria em Saúde | Gestão Hospitalar | Tecnologia em Saúde</small>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-shell">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-button mobile-menu" id="mobileMenu" type="button" aria-label="Abrir menu">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+
+          <img class="institutional-emblem" src="assets/brasao-caninde.png" alt="Brasão do município de Canindé de São Francisco">
+
+          <div class="greeting">
+            <span>Prefeitura Municipal de Canindé de São Francisco – SE</span>
+            <strong>Secretaria Municipal de Saúde</strong>
+            <small>Hospital Municipal Haydée Carvalho Leite Santos</small>
+            <small>GSI Saúde | Gestão hospitalar integrada</small>
+          </div>
+        </div>
+
+        <div class="topbar-controls">
+          <label>
+            <span>Unidade</span>
+            <select>
+              <option>Hospital Municipal Haydée Carvalho Leite Santos</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Setor/Sala</span>
+            <select id="sectorSelect" aria-label="Navegar para setor/sala"></select>
+          </label>
+
+          <button class="notification-button" type="button" aria-label="Notificações">
+            <span class="bell"></span>
+            <small>4</small>
+          </button>
+
+          <div class="user-menu-wrap">
+            <button class="avatar top-avatar" id="userMenuButton" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Menu do usuário">EG</button>
+            <div class="user-menu" id="userMenuPanel" hidden>
+              <div class="user-menu-head">
+                <strong>Erick José Gomes da Silva</strong>
+                <small>Gestor Público<br>Auditoria em Saúde | Gestão Hospitalar | Tecnologia em Saúde</small>
+              </div>
+              <div class="user-menu-block">
+                <span>Unidade atual</span>
+                <p>Hospital Municipal Haydée Carvalho Leite Santos</p>
+              </div>
+              <div class="user-menu-block">
+                <span>Perfil atual</span>
+                <p><span class="status" id="userMenuProfileBadge"></span></p>
+              </div>
+              <label class="user-menu-select">
+                <span>Trocar perfil operacional</span>
+                <select id="userMenuProfileSelect"></select>
+              </label>
+              <div class="user-menu-actions">
+                <button type="button" class="secondary-action" data-action="open-settings-from-menu">Configurações</button>
+                <button type="button" class="secondary-action" data-action="demo-logout">Encerrar sessão</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="content" id="appContent" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div class="overlay" id="overlay"></div>
+
+  <script src="api.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
