@@ -3597,7 +3597,11 @@ function handleAction(action, button) {
   }
   if (action === "demo-logout") {
     closeUserMenu();
-    showToast("Funcionalidade demonstrativa.", "warn");
+    if (window.GsiAuth && typeof window.GsiAuth.signOut === "function") {
+      window.GsiAuth.signOut();
+    } else {
+      showToast("Funcionalidade demonstrativa.", "warn");
+    }
     return;
   }
   showToast("Ação simulada executada.");

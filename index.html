@@ -8,7 +8,34 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <div class="app-shell">
+  <div class="login-screen" id="loginScreen">
+    <form class="login-card" id="loginForm" novalidate>
+      <div class="brand">
+        <span class="brand-mark">GS</span>
+        <div>
+          <strong>GSI Saúde</strong>
+          <small>Gestão hospitalar integrada</small>
+        </div>
+      </div>
+      <p class="login-subtitle">Acesso restrito a profissionais autorizados.</p>
+
+      <label class="field full">
+        <span>E-mail institucional</span>
+        <input type="email" id="loginEmail" name="email" autocomplete="username" required>
+      </label>
+
+      <label class="field full">
+        <span>Senha</span>
+        <input type="password" id="loginPassword" name="password" autocomplete="current-password" required>
+      </label>
+
+      <p class="login-error" id="loginError" hidden></p>
+
+      <button type="submit" class="action-button" id="loginSubmit">Entrar</button>
+    </form>
+  </div>
+
+  <div class="app-shell" id="appShell" hidden>
     <aside class="sidebar" id="sidebar" aria-label="Menu principal">
       <div class="brand">
         <span class="brand-mark">GS</span>
@@ -105,6 +132,8 @@
 
   <div class="overlay" id="overlay"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="auth.js"></script>
   <script src="api.js"></script>
   <script src="script.js"></script>
 </body>
