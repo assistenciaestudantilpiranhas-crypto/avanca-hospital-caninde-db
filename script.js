@@ -2492,7 +2492,7 @@ const pages = {
   indicadores,
   relatorios,
   configuracoes,
-  sair: () => pageHead("Sair", "Protótipo visual sem autenticação real. Em uma versão futura, esta ação encerraria a sessão.")
+  sair: () => pageHead("Sair", "A sessão deste sistema é gerenciada pelo Supabase Auth. Para encerrar sua sessão, use o botão \"Encerrar sessão\" no menu do usuário, no topo da tela.")
 };
 
 let tvRefreshTimer = null;
