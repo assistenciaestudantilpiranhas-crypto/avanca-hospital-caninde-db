@@ -206,7 +206,7 @@ window.GsiAuth = (() => {
   async function signIn(email, password) {
     setLoginError("");
     setLoginLoading(true);
-    const { data, error } = await client.auth.signInWithPassword({ email, password });
+    const { error } = await client.auth.signInWithPassword({ email, password });
     setLoginLoading(false);
 
     if (error) {
@@ -214,7 +214,12 @@ window.GsiAuth = (() => {
       return;
     }
 
-    await handleSession(data.session);
+    // Nao chama handleSession(...) aqui de proposito: client.auth.signInWithPassword
+    // bem-sucedido ja faz o onAuthStateChange disparar o evento SIGNED_IN, que e a
+    // UNICA fonte que chama handleSession() (ver registro do listener mais abaixo).
+    // Chamar explicitamente aqui criava uma segunda cadeia assincrona concorrente
+    // (cada uma com seu proprio loadUserProfile()), sem nenhuma garantia de ordem
+    // de conclusao - causa raiz do menu desatualizado ao trocar de usuario sem F5.
   }
 
   async function signOut() {
@@ -263,11 +268,14 @@ window.GsiAuth = (() => {
     });
   }
 
+  // Fonte unica de verdade para handleSession(): o supabase-js dispara este
+  // callback automaticamente para SIGNED_IN, SIGNED_OUT e tambem uma vez no
+  // carregamento da pagina com a sessao restaurada do localStorage (evento
+  // INITIAL_SESSION) - nao e necessario (e e ativamente prejudicial, ver
+  // signIn()) chamar handleSession() manualmente em mais nenhum lugar.
   client.auth.onAuthStateChange((_event, session) => {
     handleSession(session);
   });
-
-  client.auth.getSession().then(({ data }) => handleSession(data.session));
 
   return {
     client,
