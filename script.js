@@ -174,6 +174,11 @@ const PRESCRICAO_CRIAR_ACTION_RULE = { permissoes: ["prescricao.criar"], perfis:
 const TRANSFERENCIA_SOLICITAR_ACTION_RULE = { permissoes: ["transferencia.solicitar"], perfis: ["Médico"] };
 const OBSERVACAO_ALTA_ACTION_RULE = { perfis: ["Médico"] };
 
+// Varredura final: reset-demo apaga e restaura TODOS os dados do prototipo -
+// somente Administracao deve acionar. Sem permissoes (nao ha chave
+// correspondente), apenas perfil.
+const RESET_DEMO_ACTION_RULE = { perfis: ["Administração"] };
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -732,7 +737,7 @@ function pacientes() {
     )}
     <div class="toolbar">
       <input class="search-box" id="patientSearch" type="search" placeholder="Buscar paciente, CPF ou Cartão SUS">
-      <button class="secondary-action" type="button" data-action="reset-demo">Restaurar dados demo</button>
+      ${isActionAllowed(RESET_DEMO_ACTION_RULE) ? '<button class="secondary-action" type="button" data-action="reset-demo">Restaurar dados demo</button>' : ""}
     </div>
     <section class="panel section-gap queue-panel queue-panel-waiting">
       <h2>Pacientes cadastrados <span class="queue-count">${list.length}</span></h2>
@@ -1321,7 +1326,9 @@ function openCallConsultModal(patientId) {
       </label>
       ${field("Profissional (opcional)", "profissional", "", "", false, false)}
     </form>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="save-call-consult" data-id="${p.id}">Chamar paciente</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(CONSULTA_INICIAR_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-call-consult" data-id="${p.id}">Chamar paciente</button>`
+    : `<button class="action-button" disabled title="Apenas o perfil Médico (ou permissão consulta.iniciar) pode chamar para consulta">Chamar paciente (sem permissão)</button>`}`);
 
   const form = byId("callConsultForm");
   const select = form.querySelector('select[name="consultorio"]');
@@ -3324,7 +3331,7 @@ const TRIAGEM_GATED_ACTIONS = ["classify-risk", "save-risk", "open-triage-modal"
 const PACIENTE_CREATE_GATED_ACTIONS = ["open-register-patient", "save-patient"];
 const ATENDIMENTO_OPEN_GATED_ACTIONS = ["call-patient", "start-care"];
 const ENFERMAGEM_GATED_ACTIONS = ["open-nursing-modal", "save-nursing-evolution"];
-const CONSULTA_INICIAR_GATED_ACTIONS = ["call-to-consult", "open-start-consult-modal", "save-start-consult"];
+const CONSULTA_INICIAR_GATED_ACTIONS = ["call-to-consult", "open-start-consult-modal", "save-start-consult", "save-call-consult"];
 const CONSULTA_CONDUTA_GATED_ACTIONS = ["open-conduct-modal", "save-conduct", "discharge-patient"];
 const EXAMES_GERENCIAR_GATED_ACTIONS = ["start-collection", "mark-in-progress", "open-release-modal", "save-exam-release", "cancel-exam"];
 const EXAME_SOLICITAR_GATED_ACTIONS = ["open-exam-request", "save-exam"];
@@ -3387,6 +3394,10 @@ function handleAction(action, button) {
   }
   if (action === "discharge-observation" && !isActionAllowed(OBSERVACAO_ALTA_ACTION_RULE)) {
     showToast("Sem permissão para dar alta da observação.", "warn");
+    return;
+  }
+  if (action === "reset-demo" && !isActionAllowed(RESET_DEMO_ACTION_RULE)) {
+    showToast("Sem permissão para restaurar dados demo.", "warn");
     return;
   }
   if (action === "open-register-patient") return openRegisterPatient();
