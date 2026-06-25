@@ -110,6 +110,13 @@ const TRIAGEM_ACTION_RULE = { permissoes: ["triagem.classificar"], perfis: ["Enf
 const PACIENTE_CREATE_ACTION_RULE = { permissoes: ["paciente.criar"], perfis: ["Recepção"] };
 const ATENDIMENTO_OPEN_ACTION_RULE = { permissoes: ["atendimento.abrir"], perfis: ["Recepção"] };
 
+// Expansao da Etapa 2.2: regra para as actions exclusivas do modulo
+// Enfermagem (open-nursing-modal, save-nursing-evolution). open-exam-request
+// e open-prescription NAO recebem gate aqui de proposito - sao botoes
+// reusados tambem em Consulta e Observacao, sem diferenciacao de contexto
+// suficiente ainda (ver analise da expansao para Enfermagem).
+const ENFERMAGEM_ACTION_RULE = { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Enfermagem"] };
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -1309,7 +1316,7 @@ function enfermagem() {
       escapeHtml(p.nome), tag(p.classificacao), status(p.status),
       ultima ? `${escapeHtml(ultima.horario)} - ${escapeHtml(ultima.profissional)}` : "Nenhuma ainda",
       `<div class="actions queue-actions queue-actions-grid">
-        ${actionButton("Registrar evolução", "open-nursing-modal", p.id, "", "queue-action queue-action-primary")}
+        ${isActionAllowed(ENFERMAGEM_ACTION_RULE) ? actionButton("Registrar evolução", "open-nursing-modal", p.id, "", "queue-action queue-action-primary") : '<span class="muted">Sem permissão</span>'}
         ${actionButton("Solicitar exame", "open-exam-request", p.id, 'data-origem="Enfermagem"', "queue-action")}
         ${actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action")}
       </div>`
@@ -1348,7 +1355,9 @@ function openNursingModal(patientId) {
         <input name="profissionalOutro" placeholder="Digite o nome">
       </label>
     </form>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="save-nursing-evolution" data-id="${p.id}">Salvar evolucao</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(ENFERMAGEM_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-nursing-evolution" data-id="${p.id}">Salvar evolucao</button>`
+    : `<button class="action-button" disabled title="Apenas o perfil Enfermagem (ou permissão enfermagem.evolucao.registrar) pode salvar a evolução">Salvar evolução (sem permissão)</button>`}`);
 
   const form = byId("nursingForm");
   const select = form.querySelector('select[name="profissional"]');
@@ -3226,6 +3235,7 @@ classificação de risco.</pre>
 const TRIAGEM_GATED_ACTIONS = ["classify-risk", "save-risk", "open-triage-modal", "save-triage", "call-to-triage"];
 const PACIENTE_CREATE_GATED_ACTIONS = ["open-register-patient", "save-patient"];
 const ATENDIMENTO_OPEN_GATED_ACTIONS = ["call-patient", "start-care"];
+const ENFERMAGEM_GATED_ACTIONS = ["open-nursing-modal", "save-nursing-evolution"];
 
 function handleAction(action, button) {
   const id = button.dataset.id;
@@ -3239,6 +3249,10 @@ function handleAction(action, button) {
   }
   if (ATENDIMENTO_OPEN_GATED_ACTIONS.includes(action) && !isActionAllowed(ATENDIMENTO_OPEN_ACTION_RULE)) {
     showToast("Você não tem permissão para abrir atendimentos.", "warn");
+    return;
+  }
+  if (ENFERMAGEM_GATED_ACTIONS.includes(action) && !isActionAllowed(ENFERMAGEM_ACTION_RULE)) {
+    showToast("Você não tem permissão para esta ação de enfermagem.", "warn");
     return;
   }
   if (action === "open-register-patient") return openRegisterPatient();
