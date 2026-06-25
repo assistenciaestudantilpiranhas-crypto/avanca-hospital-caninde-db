@@ -125,6 +125,18 @@ const ENFERMAGEM_ACTION_RULE = { permissoes: ["enfermagem.evolucao.registrar"], 
 const CONSULTA_INICIAR_ACTION_RULE = { permissoes: ["consulta.iniciar"], perfis: ["Médico"] };
 const CONSULTA_CONDUTA_ACTION_RULE = { permissoes: ["consulta.registrar_conduta"], perfis: ["Médico"] };
 
+// Expansao da Etapa 2.2: regra para as actions operacionais exclusivas do
+// modulo Exames (start-collection, mark-in-progress, open-release-modal,
+// save-exam-release, cancel-exam). open-exam-request e save-exam NAO
+// recebem gate aqui de proposito - open-exam-request e compartilhado com
+// Consulta/Enfermagem/Observacao, e save-exam (mesmo sendo um unico botao)
+// e alcancavel a partir desses 3 contextos, alem de haver conflito entre a
+// permissao exame.solicitar (seedada so para Medico) e o comportamento
+// atual da UI (que tambem permite Enfermagem solicitar exame) - decisao de
+// negocio pendente antes de gatear. view-exam-result e print-exam tambem
+// ficam de fora: leitura pura e utilitario sem escrita, respectivamente.
+const EXAMES_GERENCIAR_ACTION_RULE = { permissoes: ["exame.liberar_resultado", "exame.marcar_critico"], perfis: ["Diagnóstico/Exames"] };
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -1423,10 +1435,16 @@ function farmacia() {
 
 function examActions(e) {
   const buttons = [];
-  if (e.status === "Solicitado") buttons.push(actionButton("Iniciar coleta", "start-collection", e.id, "", "queue-action queue-action-primary"));
-  if (e.status === "Em coleta") buttons.push(actionButton("Marcar em execução", "mark-in-progress", e.id, "", "queue-action queue-action-primary"));
-  if (["Solicitado", "Em coleta", "Em execucao"].includes(e.status)) buttons.push(actionButton("Liberar resultado", "open-release-modal", e.id, "", "queue-action queue-action-primary"));
-  if (["Solicitado", "Em coleta", "Em execucao"].includes(e.status)) buttons.push(actionButton("Cancelar exame", "cancel-exam", e.id, "", "danger queue-action"));
+  const podeGerenciarExame = isActionAllowed(EXAMES_GERENCIAR_ACTION_RULE);
+  const emAndamento = ["Solicitado", "Em coleta", "Em execucao"].includes(e.status);
+  if (podeGerenciarExame) {
+    if (e.status === "Solicitado") buttons.push(actionButton("Iniciar coleta", "start-collection", e.id, "", "queue-action queue-action-primary"));
+    if (e.status === "Em coleta") buttons.push(actionButton("Marcar em execução", "mark-in-progress", e.id, "", "queue-action queue-action-primary"));
+    if (emAndamento) buttons.push(actionButton("Liberar resultado", "open-release-modal", e.id, "", "queue-action queue-action-primary"));
+    if (emAndamento) buttons.push(actionButton("Cancelar exame", "cancel-exam", e.id, "", "danger queue-action"));
+  } else if (emAndamento) {
+    buttons.push('<span class="muted">Sem permissão</span>');
+  }
   buttons.push(actionButton("Ver resultado", "view-exam-result", e.id, "", "queue-action"));
   buttons.push(actionButton("Reimprimir solicitação", "print-exam", e.id, "", "queue-action"));
   return `<div class="actions queue-actions queue-actions-grid">${buttons.join("")}</div>`;
@@ -1507,7 +1525,9 @@ function openExamReleaseModal(examId) {
         <input name="profissionalOutro" placeholder="Digite o nome">
       </label>
     </form>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="save-exam-release" data-id="${e.id}">Confirmar liberação</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(EXAMES_GERENCIAR_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-exam-release" data-id="${e.id}">Confirmar liberação</button>`
+    : `<button class="action-button" disabled title="Apenas o perfil Diagnóstico/Exames (ou permissão exame.liberar_resultado/exame.marcar_critico) pode liberar resultados">Confirmar liberação (sem permissão)</button>`}`);
 
   const form = byId("examReleaseForm");
   const select = form.querySelector('select[name="profissional"]');
@@ -3252,6 +3272,7 @@ const ATENDIMENTO_OPEN_GATED_ACTIONS = ["call-patient", "start-care"];
 const ENFERMAGEM_GATED_ACTIONS = ["open-nursing-modal", "save-nursing-evolution"];
 const CONSULTA_INICIAR_GATED_ACTIONS = ["call-to-consult", "open-start-consult-modal", "save-start-consult"];
 const CONSULTA_CONDUTA_GATED_ACTIONS = ["open-conduct-modal", "save-conduct", "discharge-patient"];
+const EXAMES_GERENCIAR_GATED_ACTIONS = ["start-collection", "mark-in-progress", "open-release-modal", "save-exam-release", "cancel-exam"];
 
 function handleAction(action, button) {
   const id = button.dataset.id;
@@ -3277,6 +3298,10 @@ function handleAction(action, button) {
   }
   if (CONSULTA_CONDUTA_GATED_ACTIONS.includes(action) && !isActionAllowed(CONSULTA_CONDUTA_ACTION_RULE)) {
     showToast("Você não tem permissão para registrar conduta médica.", "warn");
+    return;
+  }
+  if (EXAMES_GERENCIAR_GATED_ACTIONS.includes(action) && !isActionAllowed(EXAMES_GERENCIAR_ACTION_RULE)) {
+    showToast("Você não tem permissão para gerenciar este exame.", "warn");
     return;
   }
   if (action === "open-register-patient") return openRegisterPatient();
