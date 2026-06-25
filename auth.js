@@ -38,6 +38,24 @@ window.GsiAuth = (() => {
     state = { usuario: null, perfis: [], permissoes: [] };
   }
 
+  // "ready" indica que a primeira resolucao de sessao (sucesso, falha ou
+  // ausencia de sessao) ja ocorreu. Codigo externo (script.js) usa isso para
+  // saber se e seguro aplicar regras de visibilidade baseadas em
+  // perfil/permissao - antes disso, esconder algo seria um falso negativo
+  // (usuario tem permissao, mas os dados ainda nao chegaram).
+  let ready = false;
+
+  function notifyReady() {
+    ready = true;
+    window.dispatchEvent(new CustomEvent("gsiauth:ready", {
+      detail: { authenticated: !!state.usuario }
+    }));
+  }
+
+  function isReady() {
+    return ready;
+  }
+
   function showLogin() {
     if (loginScreen) loginScreen.hidden = false;
     if (appShell) appShell.hidden = true;
@@ -160,6 +178,7 @@ window.GsiAuth = (() => {
     if (!session || !session.user) {
       resetState();
       showLogin();
+      notifyReady();
       return;
     }
 
@@ -169,6 +188,7 @@ window.GsiAuth = (() => {
       resetState();
       await client.auth.signOut();
       showLogin();
+      notifyReady();
       return;
     }
 
@@ -180,6 +200,7 @@ window.GsiAuth = (() => {
 
     applyUserToUI(profile.usuario, profile.perfis);
     showApp();
+    notifyReady();
   }
 
   async function signIn(email, password) {
@@ -255,6 +276,7 @@ window.GsiAuth = (() => {
     getPerfis,
     getPermissoes,
     hasPerfil,
-    hasPermission
+    hasPermission,
+    isReady
   };
 })();

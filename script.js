@@ -25,6 +25,57 @@ const sectorOptions = [
   ...menuItems.filter(([id]) => id !== "configuracoes" && id !== "sair").map(([id, label]) => [label, id])
 ];
 
+// Etapa 2.1: mapa rota -> permissao/perfil necessario para o item aparecer
+// no menu. "Administração" sempre ve tudo (curto-circuito em
+// isRouteAllowed) e nao precisa ser listado aqui. "dashboard"/"sair" sao
+// sempre visiveis para qualquer usuario autenticado, tambem fora deste mapa.
+// Atencao: isto e controle de UX/visibilidade, NAO e controle de seguranca -
+// a protecao real continua sendo RLS no banco (ver migrations de RLS).
+const routePermissions = {
+  pacientes: { permissoes: ["paciente.criar"], perfis: ["Recepção", "Enfermagem", "Médico"] },
+  atendimentos: { permissoes: ["atendimento.abrir"], perfis: ["Recepção", "Enfermagem", "Médico", "Regulação/Transferências"] },
+  "painel-chamada": { permissoes: ["atendimento.abrir"], perfis: ["Recepção", "Enfermagem", "Médico"] },
+  risco: { permissoes: ["triagem.classificar"], perfis: ["Enfermagem"] },
+  triagem: { permissoes: ["triagem.classificar"], perfis: ["Enfermagem"] },
+  consulta: { permissoes: ["consulta.iniciar", "consulta.registrar_conduta"], perfis: [] },
+  enfermagem: { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Enfermagem"] },
+  farmacia: { permissoes: ["prescricao.dispensar", "estoque.movimentar"], perfis: ["Farmácia"] },
+  exames: { permissoes: ["exame.visualizar", "exame.solicitar"], perfis: ["Diagnóstico/Exames"] },
+  estabilizacao: { permissoes: [], perfis: ["Enfermagem", "Médico"] },
+  "observacao-clinica": { permissoes: ["observacao.reavaliar"], perfis: ["Enfermagem", "Médico"] },
+  "observacao-pediatrica": { permissoes: ["observacao.reavaliar"], perfis: ["Enfermagem", "Médico"] },
+  "observacao-obstetrica": { permissoes: ["observacao.reavaliar"], perfis: ["Enfermagem", "Médico"] },
+  transferencias: { permissoes: ["transferencia.solicitar", "transferencia.aprovar_vaga", "transferencia.confirmar_saida"], perfis: ["Regulação/Transferências"] },
+  indicadores: { permissoes: [], perfis: ["Auditoria", "Gestão Hospitalar", "Leitura/Gestor"] },
+  relatorios: { permissoes: [], perfis: ["Auditoria", "Gestão Hospitalar", "Leitura/Gestor"] },
+  configuracoes: { permissoes: ["configuracoes.gerenciar"], perfis: [] }
+};
+
+const ALWAYS_VISIBLE_ROUTES = ["dashboard", "sair"];
+
+// Decide se a rota deve aparecer no menu/ser navegavel, com base no
+// perfil/permissoes REAIS carregados por window.GsiAuth (nunca no seletor
+// simulado de "Modo de simulação operacional"). Enquanto a sessao ainda nao
+// terminou de carregar (GsiAuth.isReady() === false), nao esconde nada, para
+// evitar menu vazio/flicker - a filtragem real so entra em vigor apos o
+// evento "gsiauth:ready".
+function isRouteAllowed(routeId) {
+  if (ALWAYS_VISIBLE_ROUTES.includes(routeId)) return true;
+
+  if (!window.GsiAuth || typeof window.GsiAuth.isReady !== "function" || !window.GsiAuth.isReady()) {
+    return true;
+  }
+
+  if (window.GsiAuth.hasPerfil("Administração")) return true;
+
+  const rule = routePermissions[routeId];
+  if (!rule) return true;
+
+  const permissaoOk = (rule.permissoes || []).some((chave) => window.GsiAuth.hasPermission(chave));
+  const perfilOk = (rule.perfis || []).some((nome) => window.GsiAuth.hasPerfil(nome));
+  return permissaoOk || perfilOk;
+}
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -2498,15 +2549,23 @@ const pages = {
 let tvRefreshTimer = null;
 
 function renderNav(active) {
-  sideNav.innerHTML = menuItems.map(([id, label, icon]) => `
-    <button type="button" class="${id === active ? "is-active" : ""}" data-page="${id}">
-      <span class="nav-icon">${icon}</span><span>${label}</span>
-    </button>
-  `).join("");
+  sideNav.innerHTML = menuItems
+    .filter(([id]) => isRouteAllowed(id))
+    .map(([id, label, icon]) => `
+      <button type="button" class="${id === active ? "is-active" : ""}" data-page="${id}">
+        <span class="nav-icon">${icon}</span><span>${label}</span>
+      </button>
+    `).join("");
 }
 
 function renderPage(pageId = currentPage) {
-  currentPage = pages[pageId] ? pageId : "dashboard";
+  const targetId = pages[pageId] ? pageId : "dashboard";
+  if (targetId !== "dashboard" && !isRouteAllowed(targetId)) {
+    showToast("Você não tem permissão para acessar este módulo.", "warn");
+    currentPage = "dashboard";
+  } else {
+    currentPage = targetId;
+  }
   document.body.classList.toggle("tv-mode", currentPage === "painel-tv");
   if (currentPage !== "painel-tv") renderNav(currentPage);
   if (sectorSelect) sectorSelect.value = sectorOptions.some(([, id]) => id === currentPage) ? currentPage : "";
@@ -3671,6 +3730,14 @@ if (userMenuButton && userMenuPanel) {
 window.addEventListener("hashchange", () => {
   const page = window.location.hash.replace("#", "");
   if (page && pages[page] && page !== currentPage) renderPage(page);
+});
+
+// Etapa 2.1: quando auth.js termina de resolver a sessao (login, logout ou
+// carregamento inicial), perfis/permissoes reais ja estao disponiveis em
+// window.GsiAuth. Re-renderiza o menu e revalida a rota atual, que pode ter
+// sido exibida de forma otimista (fail-open) antes da sessao carregar.
+window.addEventListener("gsiauth:ready", () => {
+  renderPage(currentPage);
 });
 
 window.addEventListener("beforeprint", () => {
