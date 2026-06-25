@@ -147,6 +147,13 @@ const EXAME_SOLICITAR_ACTION_RULE = { permissoes: ["exame.solicitar"], perfis: [
 const PRESCRICAO_DISPENSAR_ACTION_RULE = { permissoes: ["prescricao.dispensar"], perfis: ["Farmácia"] };
 const ESTOQUE_MOVIMENTAR_ACTION_RULE = { permissoes: ["estoque.movimentar"], perfis: ["Farmácia"] };
 
+// Regra de negocio: Enfermagem nao deve encaminhar paciente da Observacao
+// para a Sala de Estabilizacao pelo sistema - apenas Medico (e Administracao,
+// pelo curto-circuito de isActionAllowed). Nao ha permissao granular no
+// banco para esta acao (so existe estabilizacao.checklist_item, que e outra
+// responsabilidade), por isso a regra usa somente perfil.
+const OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE = { perfis: ["Médico"] };
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -1699,7 +1706,7 @@ function observationQueueActions(p, modulo, origemLabel, options = {}) {
   const buttons = [actionButton("Registrar reavaliação", "open-observation-reassess-modal", p.id, `data-modulo="${modulo}"`, "queue-action queue-action-primary")];
   if (isActionAllowed(EXAME_SOLICITAR_ACTION_RULE)) buttons.push(actionButton("Solicitar exame", "open-exam-request", p.id, `data-origem="${origemLabel}"`, "queue-action"));
   buttons.push(actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action"));
-  if (options.includeStabilization) buttons.push(actionButton("Encaminhar para estabilização", "route-to-stabilization", p.id, "", "queue-action"));
+  if (options.includeStabilization && isActionAllowed(OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE)) buttons.push(actionButton("Encaminhar para estabilização", "route-to-stabilization", p.id, "", "queue-action"));
   buttons.push(actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action"));
   buttons.push(actionButton("Dar alta da observação", "discharge-observation", p.id, "", "danger queue-action"));
   return `<div class="actions queue-actions queue-actions-grid">${buttons.join("")}</div>`;
@@ -3335,6 +3342,10 @@ function handleAction(action, button) {
   }
   if (ESTOQUE_MOVIMENTAR_GATED_ACTIONS.includes(action) && !isActionAllowed(ESTOQUE_MOVIMENTAR_ACTION_RULE)) {
     showToast("Sem permissão para movimentar estoque.", "warn");
+    return;
+  }
+  if (action === "route-to-stabilization" && !isActionAllowed(OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE)) {
+    showToast("Sem permissão para encaminhar para a estabilização.", "warn");
     return;
   }
   if (action === "open-register-patient") return openRegisterPatient();
