@@ -102,6 +102,14 @@ function isActionAllowed(rule) {
 // etapa.
 const TRIAGEM_ACTION_RULE = { permissoes: ["triagem.classificar"], perfis: ["Enfermagem"] };
 
+// Expansao da Etapa 2.2: regras de permissao para as actions de
+// Pacientes/Atendimentos (open-register-patient, save-patient, call-patient,
+// start-care). view-patient e go-to-stage NAO recebem gate de proposito -
+// sao leitura pura e navegacao para uma rota que ja tem seu proprio gate
+// (Etapa 2.1).
+const PACIENTE_CREATE_ACTION_RULE = { permissoes: ["paciente.criar"], perfis: ["Recepção"] };
+const ATENDIMENTO_OPEN_ACTION_RULE = { permissoes: ["atendimento.abrir"], perfis: ["Recepção"] };
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -650,8 +658,14 @@ function pacientes() {
     patientTimesCell(p),
     patientActionsCell(p)
   ]);
+  const podeCadastrarPaciente = isActionAllowed(PACIENTE_CREATE_ACTION_RULE);
   return `
-    ${pageHead("Pacientes", "Cadastro demonstrativo com busca, chamada, atendimento e classificação de risco.", "Registrar paciente", "open-register-patient")}
+    ${pageHead(
+      "Pacientes",
+      "Cadastro demonstrativo com busca, chamada, atendimento e classificação de risco.",
+      podeCadastrarPaciente ? "Registrar paciente" : "",
+      podeCadastrarPaciente ? "open-register-patient" : ""
+    )}
     <div class="toolbar">
       <input class="search-box" id="patientSearch" type="search" placeholder="Buscar paciente, CPF ou Cartão SUS">
       <button class="secondary-action" type="button" data-action="reset-demo">Restaurar dados demo</button>
@@ -2691,7 +2705,9 @@ function openRegisterPatient() {
       ${field("Queixa principal", "queixa", "", "full", true)}
       ${field("Observações", "observacoes", "", "full", true, false)}
     </form>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="save-patient">Salvar paciente</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(PACIENTE_CREATE_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-patient">Salvar paciente</button>`
+    : `<button class="action-button" disabled title="Apenas o perfil Recepção (ou permissão paciente.criar) pode cadastrar pacientes">Salvar paciente (sem permissão)</button>`}`);
 
   const form = byId("patientForm");
   const municipioInput = form.querySelector('input[name="municipio"]');
@@ -3208,11 +3224,21 @@ classificação de risco.</pre>
 }
 
 const TRIAGEM_GATED_ACTIONS = ["classify-risk", "save-risk", "open-triage-modal", "save-triage", "call-to-triage"];
+const PACIENTE_CREATE_GATED_ACTIONS = ["open-register-patient", "save-patient"];
+const ATENDIMENTO_OPEN_GATED_ACTIONS = ["call-patient", "start-care"];
 
 function handleAction(action, button) {
   const id = button.dataset.id;
   if (TRIAGEM_GATED_ACTIONS.includes(action) && !isActionAllowed(TRIAGEM_ACTION_RULE)) {
     showToast("Você não tem permissão para esta ação de triagem.", "warn");
+    return;
+  }
+  if (PACIENTE_CREATE_GATED_ACTIONS.includes(action) && !isActionAllowed(PACIENTE_CREATE_ACTION_RULE)) {
+    showToast("Você não tem permissão para cadastrar pacientes.", "warn");
+    return;
+  }
+  if (ATENDIMENTO_OPEN_GATED_ACTIONS.includes(action) && !isActionAllowed(ATENDIMENTO_OPEN_ACTION_RULE)) {
+    showToast("Você não tem permissão para abrir atendimentos.", "warn");
     return;
   }
   if (action === "open-register-patient") return openRegisterPatient();
