@@ -163,6 +163,17 @@ const OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE = { perfis: ["Médico"] };
 // padrao ja aplicado para exame.solicitar.
 const PRESCRICAO_CRIAR_ACTION_RULE = { permissoes: ["prescricao.criar"], perfis: ["Médico"] };
 
+// Regras de negocio: apenas Medico (e Administracao, pelo curto-circuito de
+// isActionAllowed) deve solicitar transferencia e dar alta da observacao.
+// transferencia.solicitar e o open-transfer-request/save-transfer mais
+// compartilhado mapeado ate aqui - aparece em Consulta, nas 3 paginas de
+// Observacao, em Estabilizacao e no proprio modulo Transferencias; a mesma
+// regra se aplica de forma uniforme em todos esses pontos, por usuario, nao
+// por origem. observacao.alta nao existe no banco - mesma abordagem ja usada
+// em route-to-stabilization, regra so por perfil.
+const TRANSFERENCIA_SOLICITAR_ACTION_RULE = { permissoes: ["transferencia.solicitar"], perfis: ["Médico"] };
+const OBSERVACAO_ALTA_ACTION_RULE = { perfis: ["Médico"] };
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -1162,7 +1173,7 @@ function consulta() {
         ${isActionAllowed(CONSULTA_CONDUTA_ACTION_RULE) ? actionButton("Registrar conduta", "open-conduct-modal", p.id, "", "queue-action queue-action-primary") : '<span class="muted">Sem permissão</span>'}
         ${isActionAllowed(EXAME_SOLICITAR_ACTION_RULE) ? actionButton("Solicitar exame", "open-exam-request", p.id, 'data-origem="Consulta Médica"', "queue-action") : ""}
         ${isActionAllowed(PRESCRICAO_CRIAR_ACTION_RULE) ? actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action") : ""}
-        ${actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action")}
+        ${isActionAllowed(TRANSFERENCIA_SOLICITAR_ACTION_RULE) ? actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action") : ""}
         ${isActionAllowed(CONSULTA_CONDUTA_ACTION_RULE) ? actionButton("Dar alta", "discharge-patient", p.id, "", "danger queue-action queue-action-highlight") : ""}
       </div>`
     ];
@@ -1716,8 +1727,8 @@ function observationQueueActions(p, modulo, origemLabel, options = {}) {
   if (isActionAllowed(EXAME_SOLICITAR_ACTION_RULE)) buttons.push(actionButton("Solicitar exame", "open-exam-request", p.id, `data-origem="${origemLabel}"`, "queue-action"));
   if (isActionAllowed(PRESCRICAO_CRIAR_ACTION_RULE)) buttons.push(actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action"));
   if (options.includeStabilization && isActionAllowed(OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE)) buttons.push(actionButton("Encaminhar para estabilização", "route-to-stabilization", p.id, "", "queue-action"));
-  buttons.push(actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action"));
-  buttons.push(actionButton("Dar alta da observação", "discharge-observation", p.id, "", "danger queue-action"));
+  if (isActionAllowed(TRANSFERENCIA_SOLICITAR_ACTION_RULE)) buttons.push(actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action"));
+  if (isActionAllowed(OBSERVACAO_ALTA_ACTION_RULE)) buttons.push(actionButton("Dar alta da observação", "discharge-observation", p.id, "", "danger queue-action"));
   return `<div class="actions queue-actions queue-actions-grid">${buttons.join("")}</div>`;
 }
 
@@ -1781,8 +1792,8 @@ function estabilizacao() {
     `<div class="checklist-cell">${checklistBadge(p)}${actionButton("Ver checklist", "open-stabilization-checklist-modal", p.id, "", "queue-action")}</div>`,
     `<div class="actions queue-actions queue-actions-grid">
       ${actionButton("Registrar reavaliação", "open-observation-reassess-modal", p.id, 'data-modulo="estabilizacao"', "queue-action queue-action-primary")}
-      ${actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action")}
-      ${actionButton("Dar alta da observação", "discharge-observation", p.id, "", "danger queue-action")}
+      ${isActionAllowed(TRANSFERENCIA_SOLICITAR_ACTION_RULE) ? actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action") : ""}
+      ${isActionAllowed(OBSERVACAO_ALTA_ACTION_RULE) ? actionButton("Dar alta da observação", "discharge-observation", p.id, "", "danger queue-action") : ""}
     </div>`
   ]);
 
@@ -1946,7 +1957,12 @@ function transferencias() {
     ];
   });
   return `
-    ${pageHead("Transferências", "Controle demonstrativo de regulação, destino, checklist e saída.", "Solicitar transferência", "open-transfer-request")}
+    ${pageHead(
+      "Transferências",
+      "Controle demonstrativo de regulação, destino, checklist e saída.",
+      isActionAllowed(TRANSFERENCIA_SOLICITAR_ACTION_RULE) ? "Solicitar transferência" : "",
+      isActionAllowed(TRANSFERENCIA_SOLICITAR_ACTION_RULE) ? "open-transfer-request" : ""
+    )}
     <section class="grid module-stats transfer-stats">
       ${metric("Em análise", list.filter((t) => t.status === "Em analise").length, "Regulação", "warning")}
       ${metric("Aguardando vaga", list.filter((t) => t.status === "Aguardando vaga").length, "Pendente")}
@@ -2857,7 +2873,9 @@ function openTransferModal(patientId = "p1") {
       ${selectField("Usou ambulância?", "usouAmbulancia", ["Sim", "Não"])}
       ${field("Profissional acompanhante", "acompanhante", "Enf. Joana Matos")}
     </form>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="save-transfer">Enviar para transferências</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(TRANSFERENCIA_SOLICITAR_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-transfer">Enviar para transferências</button>`
+    : `<button class="action-button" disabled title="Sem permissão para solicitar transferência">Enviar para transferências (sem permissão)</button>`}`);
 
   const form = byId("transferForm");
   const setupOther = (selectName, fieldId, otherLabel) => {
@@ -3361,6 +3379,14 @@ function handleAction(action, button) {
   }
   if (["open-prescription", "save-prescription"].includes(action) && !isActionAllowed(PRESCRICAO_CRIAR_ACTION_RULE)) {
     showToast("Sem permissão para prescrever medicação.", "warn");
+    return;
+  }
+  if (["open-transfer-request", "save-transfer"].includes(action) && !isActionAllowed(TRANSFERENCIA_SOLICITAR_ACTION_RULE)) {
+    showToast("Sem permissão para solicitar transferência.", "warn");
+    return;
+  }
+  if (action === "discharge-observation" && !isActionAllowed(OBSERVACAO_ALTA_ACTION_RULE)) {
+    showToast("Sem permissão para dar alta da observação.", "warn");
     return;
   }
   if (action === "open-register-patient") return openRegisterPatient();
