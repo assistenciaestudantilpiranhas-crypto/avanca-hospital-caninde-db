@@ -1,6 +1,9 @@
 // auth.js — autenticacao real (Supabase Auth) para o GSI Saude.
-// Etapa 1 do plano de integracao: sessao, login, logout e identidade do
-// usuario. NAO migra dados clinicos (continuam em localStorage via GsiApi).
+// Etapa 1: sessao, login, logout e identidade do usuario.
+// Etapa 2.0: carrega perfis e permissoes reais do usuario logado (usuario_perfil
+// + perfis_acesso + perfil_permissao + permissoes) e expoe consultas seguras
+// via window.GsiAuth. NAO esconde menus/botoes ainda (isso e Etapa 2.1/2.2).
+// NAO migra dados clinicos (continuam em localStorage via GsiApi).
 // NAO cria CRUD de usuarios/perfis. NAO usa service_role - apenas anon key.
 
 window.GsiAuth = (() => {
@@ -20,6 +23,20 @@ window.GsiAuth = (() => {
   const loginEmailInput = document.getElementById("loginEmail");
   const loginPasswordInput = document.getElementById("loginPassword");
   const loginSubmitButton = document.getElementById("loginSubmit");
+
+  // Estado interno do usuario autenticado. Nao usar diretamente fora deste
+  // modulo - acessar somente via getCurrentUser()/getPerfis()/getPermissoes()
+  // /hasPerfil()/hasPermission(), que retornam copias (clone), nunca a
+  // referencia interna.
+  let state = {
+    usuario: null,
+    perfis: [],
+    permissoes: []
+  };
+
+  function resetState() {
+    state = { usuario: null, perfis: [], permissoes: [] };
+  }
 
   function showLogin() {
     if (loginScreen) loginScreen.hidden = false;
@@ -51,10 +68,13 @@ window.GsiAuth = (() => {
     return (first + last).toUpperCase() || "US";
   }
 
-  // Busca o registro institucional (public.usuarios) e os perfis vinculados
-  // (usuario_perfil + perfis_acesso) do usuario autenticado. Sujeito a RLS -
-  // o proprio usuario sempre pode ler o seu registro (policy
-  // usuarios_select_self_or_admin / usuario_perfil_select_self_or_admin).
+  // Busca o registro institucional (public.usuarios), os perfis vinculados
+  // (usuario_perfil + perfis_acesso) e, a partir de TODOS os perfis do
+  // usuario, as permissoes vinculadas (perfil_permissao + permissoes).
+  // Sujeito a RLS - o proprio usuario sempre pode ler seus proprios vinculos
+  // (policies usuarios_select_self_or_admin, usuario_perfil_select_self_or_admin)
+  // e qualquer usuario vinculado pode ler o catalogo de perfis_acesso/
+  // permissoes/perfil_permissao (policies *_select_linked).
   async function loadUserProfile(authUser) {
     const { data: usuario, error: usuarioError } = await client
       .from("usuarios")
@@ -69,7 +89,7 @@ window.GsiAuth = (() => {
 
     const { data: vinculos, error: perfilError } = await client
       .from("usuario_perfil")
-      .select("perfis_acesso(nome)")
+      .select("perfis_acesso(id, nome, descricao)")
       .eq("usuario_id", authUser.id);
 
     if (perfilError) {
@@ -77,20 +97,46 @@ window.GsiAuth = (() => {
     }
 
     const perfis = (vinculos || [])
-      .map((vinculo) => vinculo.perfis_acesso && vinculo.perfis_acesso.nome)
+      .map((vinculo) => vinculo.perfis_acesso)
       .filter(Boolean);
 
-    return { usuario, perfis };
+    const perfilIds = perfis.map((perfil) => perfil.id);
+    let permissoes = [];
+
+    if (perfilIds.length) {
+      const { data: permVinculos, error: permissaoError } = await client
+        .from("perfil_permissao")
+        .select("permissoes(chave, modulo, descricao)")
+        .in("perfil_id", perfilIds);
+
+      if (permissaoError) {
+        console.error("GsiAuth: erro ao carregar perfil_permissao/permissoes", permissaoError);
+      }
+
+      const chavesVistas = new Set();
+      permissoes = (permVinculos || [])
+        .map((vinculo) => vinculo.permissoes)
+        .filter(Boolean)
+        .filter((permissao) => {
+          if (chavesVistas.has(permissao.chave)) return false;
+          chavesVistas.add(permissao.chave);
+          return true;
+        });
+    }
+
+    return { usuario, perfis, permissoes };
   }
 
   // Substitui o nome/perfil estaticos da sidebar e do menu do usuario pelos
-  // dados reais vindos do banco. Nao remove o seletor de "perfil
-  // operacional" simulado (script.js) - apenas o badge de perfil real passa
-  // a refletir usuario_perfil/perfis_acesso, mais confiavel que a simulacao.
+  // dados reais vindos do banco. Nao remove o seletor de "modo de simulacao
+  // operacional" (script.js) - apenas o badge de perfil real passa a
+  // refletir usuario_perfil/perfis_acesso. Se houver mais de um perfil, o
+  // badge principal mostra o primeiro; a descricao completa lista todos.
   function applyUserToUI(usuario, perfis) {
     const nome = usuario?.nome || "Usuário sem nome cadastrado";
-    const perfilLabel = perfis && perfis.length ? perfis.join(" | ") : "Sem perfil vinculado";
-    const perfilPrincipal = perfis && perfis.length ? perfis[0] : "Sem perfil vinculado";
+    const nomesPerfis = perfis.map((perfil) => perfil.nome);
+    const perfilLabel = nomesPerfis.length ? nomesPerfis.join(" | ") : "Sem perfil vinculado";
+    const perfilPrincipal = nomesPerfis.length ? nomesPerfis[0] : "Sem perfil vinculado";
     const sigla = initials(nome);
 
     document.querySelectorAll(".user-card strong").forEach((el) => { el.textContent = nome; });
@@ -112,6 +158,7 @@ window.GsiAuth = (() => {
 
   async function handleSession(session) {
     if (!session || !session.user) {
+      resetState();
       showLogin();
       return;
     }
@@ -119,10 +166,17 @@ window.GsiAuth = (() => {
     const profile = await loadUserProfile(session.user);
     if (!profile) {
       setLoginError("Usuário autenticado, mas sem cadastro em public.usuarios. Contate o administrador.");
+      resetState();
       await client.auth.signOut();
       showLogin();
       return;
     }
+
+    state = {
+      usuario: profile.usuario,
+      perfis: profile.perfis,
+      permissoes: profile.permissoes
+    };
 
     applyUserToUI(profile.usuario, profile.perfis);
     showApp();
@@ -144,9 +198,33 @@ window.GsiAuth = (() => {
 
   async function signOut() {
     await client.auth.signOut();
+    resetState();
     if (loginPasswordInput) loginPasswordInput.value = "";
     setLoginError("");
     showLogin();
+  }
+
+  // Consultas seguras ao estado interno - sempre retornam copias (clone),
+  // nunca a referencia direta a "state", para evitar que codigo externo
+  // mute o estado de autenticacao por engano.
+  function getCurrentUser() {
+    return state.usuario ? { ...state.usuario } : null;
+  }
+
+  function getPerfis() {
+    return state.perfis.map((perfil) => ({ ...perfil }));
+  }
+
+  function getPermissoes() {
+    return state.permissoes.map((permissao) => ({ ...permissao }));
+  }
+
+  function hasPerfil(nome) {
+    return state.perfis.some((perfil) => perfil.nome === nome);
+  }
+
+  function hasPermission(chave) {
+    return state.permissoes.some((permissao) => permissao.chave === chave);
   }
 
   if (loginForm) {
@@ -170,5 +248,13 @@ window.GsiAuth = (() => {
 
   client.auth.getSession().then(({ data }) => handleSession(data.session));
 
-  return { client, signOut };
+  return {
+    client,
+    signOut,
+    getCurrentUser,
+    getPerfis,
+    getPermissoes,
+    hasPerfil,
+    hasPermission
+  };
 })();
