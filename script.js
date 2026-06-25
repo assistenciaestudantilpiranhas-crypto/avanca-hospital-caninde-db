@@ -138,6 +138,15 @@ const EXAMES_GERENCIAR_ACTION_RULE = { permissoes: ["exame.liberar_resultado", "
 // observationQueueActions()), alem do proprio save-exam.
 const EXAME_SOLICITAR_ACTION_RULE = { permissoes: ["exame.solicitar"], perfis: ["Médico"] };
 
+// Expansao da Etapa 2.2: regras para as actions exclusivas de Farmacia/
+// Estoque (rx-status, open-stock-item, save-stock). open-prescription e
+// save-prescription NAO recebem gate aqui de proposito - sao compartilhados
+// com Consulta/Enfermagem/Observacao e dependem de decisao de negocio
+// pendente (mesmo padrao do caso de exame.solicitar). request-restock
+// tambem fica de fora: e so um toast de simulacao, sem escrita real.
+const PRESCRICAO_DISPENSAR_ACTION_RULE = { permissoes: ["prescricao.dispensar"], perfis: ["Farmácia"] };
+const ESTOQUE_MOVIMENTAR_ACTION_RULE = { permissoes: ["estoque.movimentar"], perfis: ["Farmácia"] };
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -1398,12 +1407,16 @@ function openNursingModal(patientId) {
 }
 
 function farmacia() {
-  const rows = GsiApi.list("prescricoes").map((p) => [
+  const prescricoesPendentesStatus = ["Pendente", "Separado", "Em falta"];
+  const prescricoesPendentes = GsiApi.list("prescricoes").filter((p) => prescricoesPendentesStatus.includes(p.status));
+  const rows = prescricoesPendentes.map((p) => [
     escapeHtml(p.paciente), escapeHtml(p.medicamento), escapeHtml(p.dose), escapeHtml(p.via), escapeHtml(p.horario), escapeHtml(p.prescritor), status(p.status),
     `<div class="actions queue-actions queue-actions-grid">
-      ${actionButton("Dispensar", "rx-status", p.id, 'data-status="Dispensado"', "queue-action queue-action-primary")}
-      ${actionButton("Separar", "rx-status", p.id, 'data-status="Separado"', "queue-action")}
-      ${actionButton("Informar falta", "rx-status", p.id, 'data-status="Em falta"', "queue-action")}
+      ${isActionAllowed(PRESCRICAO_DISPENSAR_ACTION_RULE) ? `
+        ${actionButton("Dispensar", "rx-status", p.id, 'data-status="Dispensado"', "queue-action queue-action-primary")}
+        ${actionButton("Separar", "rx-status", p.id, 'data-status="Separado"', "queue-action")}
+        ${actionButton("Informar falta", "rx-status", p.id, 'data-status="Em falta"', "queue-action")}
+      ` : '<span class="muted">Sem permissão</span>'}
       ${actionButton("Solicitar reposição", "request-restock", p.id, `data-nome="${escapeHtml(p.medicamento)}"`, "queue-action")}
     </div>`
   ]);
@@ -1419,15 +1432,15 @@ function farmacia() {
     </section>
     <section class="grid two-column section-gap">
       <div class="panel wide-panel queue-panel queue-panel-waiting">
-        <h2>Prescrições pendentes <span class="queue-count">${rows.length}</span></h2>
+        <h2>Prescrições não dispensadas <span class="queue-count">${rows.length}</span></h2>
         <div class="queue-table">${table(["Paciente", "Medicamento", "Dose", "Via", "Horário", "Prescritor", "Status", "Ação"], rows)}</div>
       </div>
-      <div class="panel"><h2>Alertas de farmácia</h2><ul class="list alert-list"><li>Medicamentos com estoque crítico.</li><li>Medicamentos próximos do vencimento.</li><li>Prescrições sem dispensação.</li><li>Itens de emergência para sala de estabilização.</li></ul></div>
+      <div class="panel"><h2>Alertas de farmácia</h2><ul class="list alert-list"><li>Medicamentos com estoque crítico.</li><li>Medicamentos próximos do vencimento.</li>${prescricoesPendentes.length ? "<li>Prescrições sem dispensação.</li>" : ""}<li>Itens de emergência para sala de estabilização.</li></ul></div>
     </section>
     <section class="panel section-gap">
       <div class="page-head" style="margin-bottom:14px">
         <h2 style="margin:0">Estoque simplificado</h2>
-        <button class="secondary-action" type="button" data-action="open-stock-item">Adicionar item ao estoque</button>
+        ${isActionAllowed(ESTOQUE_MOVIMENTAR_ACTION_RULE) ? '<button class="secondary-action" type="button" data-action="open-stock-item">Adicionar item ao estoque</button>' : ""}
       </div>
       <div class="queue-table">${table(["Medicamento", "Quantidade atual", "Estoque mínimo", "Situação", "Validade", "Localização"], stockRows)}</div>
     </section>
@@ -3247,7 +3260,9 @@ function openStockModal() {
       ${field("Validade", "validade", "12/2026")}
       ${field("Localização", "local", "Armário A1")}
     </form>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="save-stock">Salvar item</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(ESTOQUE_MOVIMENTAR_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-stock">Salvar item</button>`
+    : `<button class="action-button" disabled title="Apenas o perfil Farmácia (ou permissão estoque.movimentar) pode salvar itens de estoque">Salvar item (sem permissão)</button>`}`);
 }
 
 function openReportPreview(name) {
@@ -3277,6 +3292,8 @@ const CONSULTA_INICIAR_GATED_ACTIONS = ["call-to-consult", "open-start-consult-m
 const CONSULTA_CONDUTA_GATED_ACTIONS = ["open-conduct-modal", "save-conduct", "discharge-patient"];
 const EXAMES_GERENCIAR_GATED_ACTIONS = ["start-collection", "mark-in-progress", "open-release-modal", "save-exam-release", "cancel-exam"];
 const EXAME_SOLICITAR_GATED_ACTIONS = ["open-exam-request", "save-exam"];
+const PRESCRICAO_DISPENSAR_GATED_ACTIONS = ["rx-status"];
+const ESTOQUE_MOVIMENTAR_GATED_ACTIONS = ["open-stock-item", "save-stock"];
 
 function handleAction(action, button) {
   const id = button.dataset.id;
@@ -3310,6 +3327,14 @@ function handleAction(action, button) {
   }
   if (EXAME_SOLICITAR_GATED_ACTIONS.includes(action) && !isActionAllowed(EXAME_SOLICITAR_ACTION_RULE)) {
     showToast("Sem permissão para solicitar exame.", "warn");
+    return;
+  }
+  if (PRESCRICAO_DISPENSAR_GATED_ACTIONS.includes(action) && !isActionAllowed(PRESCRICAO_DISPENSAR_ACTION_RULE)) {
+    showToast("Sem permissão para dispensar prescrição.", "warn");
+    return;
+  }
+  if (ESTOQUE_MOVIMENTAR_GATED_ACTIONS.includes(action) && !isActionAllowed(ESTOQUE_MOVIMENTAR_ACTION_RULE)) {
+    showToast("Sem permissão para movimentar estoque.", "warn");
     return;
   }
   if (action === "open-register-patient") return openRegisterPatient();
