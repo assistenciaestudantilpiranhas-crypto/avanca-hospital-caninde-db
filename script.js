@@ -76,6 +76,32 @@ function isRouteAllowed(routeId) {
   return permissaoOk || perfilOk;
 }
 
+// Etapa 2.2 (piloto): mesma logica de isRouteAllowed, mas para um botao/
+// acao individual em vez de uma rota inteira. Recebe a regra diretamente
+// (em vez de buscar num mapa por id) para permitir reuso em botoes que
+// pertencem a mais de um modulo. Mesmo padrao: Administração sempre pode,
+// fail-open enquanto a sessao nao carregou, nunca usa o seletor simulado de
+// "Modo de simulação operacional".
+function isActionAllowed(rule) {
+  if (!rule) return true;
+
+  if (!window.GsiAuth || typeof window.GsiAuth.isReady !== "function" || !window.GsiAuth.isReady()) {
+    return true;
+  }
+
+  if (window.GsiAuth.hasPerfil("Administração")) return true;
+
+  const permissaoOk = (rule.permissoes || []).some((chave) => window.GsiAuth.hasPermission(chave));
+  const perfilOk = (rule.perfis || []).some((nome) => window.GsiAuth.hasPerfil(nome));
+  return permissaoOk || perfilOk;
+}
+
+// Piloto da Etapa 2.2: regra de permissao para as actions do modulo
+// Triagem/Classificacao (classify-risk, save-risk, open-triage-modal,
+// save-triage, call-to-triage). Demais modulos permanecem sem gate nesta
+// etapa.
+const TRIAGEM_ACTION_RULE = { permissoes: ["triagem.classificar"], perfis: ["Enfermagem"] };
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -875,7 +901,7 @@ function classificacao() {
     <section class="panel section-gap">
       <h2>Pacientes pendentes de classificação</h2>
       ${waiting.length
-        ? table(["Paciente", "Queixa principal", "Status", "Ação"], waiting.map((p) => [escapeHtml(p.nome), escapeHtml(p.queixa), status(p.status), actionButton("Abrir triagem", "open-triage-modal", p.id)]))
+        ? table(["Paciente", "Queixa principal", "Status", "Ação"], waiting.map((p) => [escapeHtml(p.nome), escapeHtml(p.queixa), status(p.status), isActionAllowed(TRIAGEM_ACTION_RULE) ? actionButton("Abrir triagem", "open-triage-modal", p.id) : '<span class="muted">Sem permissão</span>']))
         : '<p class="muted">Nenhum paciente pendente de classificação de risco.</p>'}
     </section>
   `;
@@ -894,8 +920,10 @@ function triagem() {
   const rows = waiting.map((p) => [
     escapeHtml(p.nome), escapeHtml(p.queixa), tag(p.classificacao), status(p.status),
     `<div class="actions">
-      ${actionButton("Chamar para triagem", "call-to-triage", p.id)}
-      ${actionButton("Iniciar triagem", "open-triage-modal", p.id)}
+      ${isActionAllowed(TRIAGEM_ACTION_RULE) ? `
+        ${actionButton("Chamar para triagem", "call-to-triage", p.id)}
+        ${actionButton("Iniciar triagem", "open-triage-modal", p.id)}
+      ` : '<span class="muted">Sem permissão para triagem</span>'}
     </div>`
   ]);
   return `
@@ -1001,7 +1029,9 @@ function openTriageModal(patientId) {
       ${selectField("Período/condição especial", "periodo", ["Dia normal", "Fim de semana", "Feriado", "Evento municipal", "Alta temporada", "Festa local", "Período de grande fluxo turístico", "Operação especial"], "Dia normal")}
       ${field("Observações da triagem", "obs", savedVitals.obs || "", "full", true, false)}
     </form>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="save-triage" data-id="${p.id}">Salvar triagem</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(TRIAGEM_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-triage" data-id="${p.id}">Salvar triagem</button>`
+    : `<button class="action-button" disabled title="Apenas o perfil Enfermagem (ou permissão triagem.classificar) pode salvar a triagem">Salvar triagem (sem permissão)</button>`}`);
 
   const form = byId("triageForm");
   const suggestedInput = form.querySelector('input[name="classificacaoSugerida"]');
@@ -3177,8 +3207,14 @@ classificação de risco.</pre>
   `, `<button class="secondary-action" data-action="close-modal">Fechar</button><button class="action-button" data-action="print-report">Imprimir / salvar PDF</button>`);
 }
 
+const TRIAGEM_GATED_ACTIONS = ["classify-risk", "save-risk", "open-triage-modal", "save-triage", "call-to-triage"];
+
 function handleAction(action, button) {
   const id = button.dataset.id;
+  if (TRIAGEM_GATED_ACTIONS.includes(action) && !isActionAllowed(TRIAGEM_ACTION_RULE)) {
+    showToast("Você não tem permissão para esta ação de triagem.", "warn");
+    return;
+  }
   if (action === "open-register-patient") return openRegisterPatient();
   if (action === "close-modal") return closeModal();
   if (action === "start-care") {
