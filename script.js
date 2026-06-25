@@ -117,6 +117,14 @@ const ATENDIMENTO_OPEN_ACTION_RULE = { permissoes: ["atendimento.abrir"], perfis
 // suficiente ainda (ver analise da expansao para Enfermagem).
 const ENFERMAGEM_ACTION_RULE = { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Enfermagem"] };
 
+// Expansao da Etapa 2.2: regras para as actions exclusivas do modulo
+// Consulta Medica. open-exam-request, open-prescription e
+// open-transfer-request NAO recebem gate aqui de proposito - sao botoes
+// reusados tambem em Enfermagem, Observacao, Estabilizacao e/ou no proprio
+// modulo Transferencias, sem diferenciacao de contexto suficiente ainda.
+const CONSULTA_INICIAR_ACTION_RULE = { permissoes: ["consulta.iniciar"], perfis: ["Médico"] };
+const CONSULTA_CONDUTA_ACTION_RULE = { permissoes: ["consulta.registrar_conduta"], perfis: ["Médico"] };
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -1096,8 +1104,10 @@ function consulta() {
       escapeHtml(getPatientConsultWait(p, a)),
       consultCallCell(p),
       `<div class="actions queue-actions queue-actions-waiting">
-        ${actionButton("Chamar para consulta", "call-to-consult", p.id, "", "queue-action")}
-        ${actionButton("Iniciar consulta", "open-start-consult-modal", p.id, "", "queue-action queue-action-primary")}
+        ${isActionAllowed(CONSULTA_INICIAR_ACTION_RULE) ? `
+          ${actionButton("Chamar para consulta", "call-to-consult", p.id, "", "queue-action")}
+          ${actionButton("Iniciar consulta", "open-start-consult-modal", p.id, "", "queue-action queue-action-primary")}
+        ` : '<span class="muted">Sem permissão</span>'}
       </div>`
     ];
   });
@@ -1111,11 +1121,11 @@ function consulta() {
       escapeHtml(p.profissionalResponsavel || a?.profissional || "Equipe médica"),
       escapeHtml(p.horaInicioConsulta || a?.inicioConsulta || "--:--"),
       `<div class="actions queue-actions queue-actions-grid">
-        ${actionButton("Registrar conduta", "open-conduct-modal", p.id, "", "queue-action queue-action-primary")}
+        ${isActionAllowed(CONSULTA_CONDUTA_ACTION_RULE) ? actionButton("Registrar conduta", "open-conduct-modal", p.id, "", "queue-action queue-action-primary") : '<span class="muted">Sem permissão</span>'}
         ${actionButton("Solicitar exame", "open-exam-request", p.id, 'data-origem="Consulta Médica"', "queue-action")}
         ${actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action")}
         ${actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action")}
-        ${actionButton("Dar alta", "discharge-patient", p.id, "", "danger queue-action queue-action-highlight")}
+        ${isActionAllowed(CONSULTA_CONDUTA_ACTION_RULE) ? actionButton("Dar alta", "discharge-patient", p.id, "", "danger queue-action queue-action-highlight") : ""}
       </div>`
     ];
   });
@@ -1152,7 +1162,9 @@ function openConductModal(patientId) {
       ${selectField("Encaminhamento/desfecho", "destino", ["Alta após consulta", "Medicação e alta", "Observação Clínica", "Observação Pediátrica", "Observação Obstétrica", "Sala de Estabilização", "Solicitar exame", "Prescrever medicação", "Transferência regulada", "Evasão/desistência", "Óbito"])}
       ${field("Observações", "obs", p.conduta?.obs || "", "full", true, false)}
     </form>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="save-conduct" data-id="${p.id}">Salvar conduta</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(CONSULTA_CONDUTA_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-conduct" data-id="${p.id}">Salvar conduta</button>`
+    : `<button class="action-button" disabled title="Apenas o perfil Médico (ou permissão consulta.registrar_conduta) pode salvar a conduta">Salvar conduta (sem permissão)</button>`}`);
 }
 
 const fictionalDoctors = ["Dr. Carlos Menezes", "Dra. Ana Beatriz Lima", "Dr. Rafael Santos", "Outro profissional médico"];
@@ -1289,7 +1301,9 @@ function openStartConsultModal(patientId) {
       ${field("Consultório/local", "sala", salaInicial, "", false, false)}
       ${field("Observação inicial", "obsInicial", "", "full", true, false)}
     </form>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="save-start-consult" data-id="${p.id}">Iniciar consulta</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(CONSULTA_INICIAR_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-start-consult" data-id="${p.id}">Iniciar consulta</button>`
+    : `<button class="action-button" disabled title="Apenas o perfil Médico (ou permissão consulta.iniciar) pode iniciar a consulta">Iniciar consulta (sem permissão)</button>`}`);
 
   const form = byId("startConsultForm");
   const select = form.querySelector('select[name="medico"]');
@@ -3236,6 +3250,8 @@ const TRIAGEM_GATED_ACTIONS = ["classify-risk", "save-risk", "open-triage-modal"
 const PACIENTE_CREATE_GATED_ACTIONS = ["open-register-patient", "save-patient"];
 const ATENDIMENTO_OPEN_GATED_ACTIONS = ["call-patient", "start-care"];
 const ENFERMAGEM_GATED_ACTIONS = ["open-nursing-modal", "save-nursing-evolution"];
+const CONSULTA_INICIAR_GATED_ACTIONS = ["call-to-consult", "open-start-consult-modal", "save-start-consult"];
+const CONSULTA_CONDUTA_GATED_ACTIONS = ["open-conduct-modal", "save-conduct", "discharge-patient"];
 
 function handleAction(action, button) {
   const id = button.dataset.id;
@@ -3253,6 +3269,14 @@ function handleAction(action, button) {
   }
   if (ENFERMAGEM_GATED_ACTIONS.includes(action) && !isActionAllowed(ENFERMAGEM_ACTION_RULE)) {
     showToast("Você não tem permissão para esta ação de enfermagem.", "warn");
+    return;
+  }
+  if (CONSULTA_INICIAR_GATED_ACTIONS.includes(action) && !isActionAllowed(CONSULTA_INICIAR_ACTION_RULE)) {
+    showToast("Você não tem permissão para iniciar consultas.", "warn");
+    return;
+  }
+  if (CONSULTA_CONDUTA_GATED_ACTIONS.includes(action) && !isActionAllowed(CONSULTA_CONDUTA_ACTION_RULE)) {
+    showToast("Você não tem permissão para registrar conduta médica.", "warn");
     return;
   }
   if (action === "open-register-patient") return openRegisterPatient();
