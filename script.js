@@ -154,6 +154,15 @@ const ESTOQUE_MOVIMENTAR_ACTION_RULE = { permissoes: ["estoque.movimentar"], per
 // responsabilidade), por isso a regra usa somente perfil.
 const OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE = { perfis: ["Médico"] };
 
+// Decisao de regra de negocio: Enfermagem (e Farmacia/Recepcao) nao deve
+// prescrever medicacao - apenas Medico. O gate e por permissao/perfil real
+// do usuario logado, nao por origem/contexto de onde o botao foi
+// renderizado - por isso a mesma regra se aplica de forma uniforme em
+// Consulta, Enfermagem e nas 3 paginas de Observacao (via
+// observationQueueActions()), alem do proprio save-prescription. Mesmo
+// padrao ja aplicado para exame.solicitar.
+const PRESCRICAO_CRIAR_ACTION_RULE = { permissoes: ["prescricao.criar"], perfis: ["Médico"] };
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -1152,7 +1161,7 @@ function consulta() {
       `<div class="actions queue-actions queue-actions-grid">
         ${isActionAllowed(CONSULTA_CONDUTA_ACTION_RULE) ? actionButton("Registrar conduta", "open-conduct-modal", p.id, "", "queue-action queue-action-primary") : '<span class="muted">Sem permissão</span>'}
         ${isActionAllowed(EXAME_SOLICITAR_ACTION_RULE) ? actionButton("Solicitar exame", "open-exam-request", p.id, 'data-origem="Consulta Médica"', "queue-action") : ""}
-        ${actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action")}
+        ${isActionAllowed(PRESCRICAO_CRIAR_ACTION_RULE) ? actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action") : ""}
         ${actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action")}
         ${isActionAllowed(CONSULTA_CONDUTA_ACTION_RULE) ? actionButton("Dar alta", "discharge-patient", p.id, "", "danger queue-action queue-action-highlight") : ""}
       </div>`
@@ -1361,7 +1370,7 @@ function enfermagem() {
       `<div class="actions queue-actions queue-actions-grid">
         ${isActionAllowed(ENFERMAGEM_ACTION_RULE) ? actionButton("Registrar evolução", "open-nursing-modal", p.id, "", "queue-action queue-action-primary") : '<span class="muted">Sem permissão</span>'}
         ${isActionAllowed(EXAME_SOLICITAR_ACTION_RULE) ? actionButton("Solicitar exame", "open-exam-request", p.id, 'data-origem="Enfermagem"', "queue-action") : ""}
-        ${actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action")}
+        ${isActionAllowed(PRESCRICAO_CRIAR_ACTION_RULE) ? actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action") : ""}
       </div>`
     ];
   });
@@ -1705,7 +1714,7 @@ function strategicIndicatorRow(indicador, resultado, situacao, base, observacao)
 function observationQueueActions(p, modulo, origemLabel, options = {}) {
   const buttons = [actionButton("Registrar reavaliação", "open-observation-reassess-modal", p.id, `data-modulo="${modulo}"`, "queue-action queue-action-primary")];
   if (isActionAllowed(EXAME_SOLICITAR_ACTION_RULE)) buttons.push(actionButton("Solicitar exame", "open-exam-request", p.id, `data-origem="${origemLabel}"`, "queue-action"));
-  buttons.push(actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action"));
+  if (isActionAllowed(PRESCRICAO_CRIAR_ACTION_RULE)) buttons.push(actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action"));
   if (options.includeStabilization && isActionAllowed(OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE)) buttons.push(actionButton("Encaminhar para estabilização", "route-to-stabilization", p.id, "", "queue-action"));
   buttons.push(actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action"));
   buttons.push(actionButton("Dar alta da observação", "discharge-observation", p.id, "", "danger queue-action"));
@@ -2823,7 +2832,9 @@ function openPrescriptionModal(patientId = "p1") {
       ${field("Via", "via", "EV")}
       ${field("Prescritor", "prescritor", "Dr. Marcos Vieira")}
     </form>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="save-prescription">Enviar para farmácia</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(PRESCRICAO_CRIAR_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-prescription">Enviar para farmácia</button>`
+    : `<button class="action-button" disabled title="Sem permissão para prescrever medicação">Enviar para farmácia (sem permissão)</button>`}`);
 }
 
 function openTransferModal(patientId = "p1") {
@@ -3346,6 +3357,10 @@ function handleAction(action, button) {
   }
   if (action === "route-to-stabilization" && !isActionAllowed(OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE)) {
     showToast("Sem permissão para encaminhar para a estabilização.", "warn");
+    return;
+  }
+  if (["open-prescription", "save-prescription"].includes(action) && !isActionAllowed(PRESCRICAO_CRIAR_ACTION_RULE)) {
+    showToast("Sem permissão para prescrever medicação.", "warn");
     return;
   }
   if (action === "open-register-patient") return openRegisterPatient();
