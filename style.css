@@ -409,8 +409,15 @@ textarea {
   width: 42px;
   height: 42px;
   border: 1px solid var(--gray-300);
-  border-radius: var(--radius);
+  border-radius: 12px;
   background: var(--white);
+  transition: border-color 0.16s var(--ease), background 0.16s var(--ease), transform 0.16s var(--ease);
+}
+
+.notification-button:hover,
+.icon-button:hover {
+  border-color: var(--blue-700);
+  background: var(--blue-100);
 }
 
 .notification-button small {
@@ -1978,7 +1985,11 @@ tr:last-child td {
 .modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(7, 29, 53, 0.56);
+  /* Tom institucional azul profundo/teal, alinhado ao padrão do login,
+     mantendo o mesmo nível de escurecimento/foco já existente. */
+  background:
+    radial-gradient(circle at 70% 20%, rgba(25, 179, 166, 0.1), transparent 45%),
+    rgba(7, 29, 53, 0.6);
   backdrop-filter: blur(4px);
 }
 
@@ -1987,10 +1998,11 @@ tr:last-child td {
   width: min(720px, 100%);
   max-height: min(86vh, 760px);
   overflow: auto;
-  border: 1px solid var(--gray-200);
-  border-radius: var(--radius);
+  border: 1px solid rgba(25, 179, 166, 0.16);
+  /* Acabamento premium alinhado ao .login-card/.metric-card já refinados. */
+  border-radius: 18px;
   background: var(--white);
-  box-shadow: 0 28px 80px rgba(7, 29, 53, 0.26);
+  box-shadow: 0 32px 90px rgba(7, 29, 53, 0.3);
   animation: modalIn 0.2s var(--ease);
 }
 
@@ -2088,6 +2100,13 @@ tr:last-child td {
   border-bottom: 1px solid var(--gray-200);
 }
 
+.modal-head {
+  /* Degradê institucional muito sutil + borda inferior teal discreta,
+     mantendo o fundo claro e a legibilidade do título. */
+  background: linear-gradient(135deg, rgba(232, 241, 248, 0.5), transparent 60%);
+  border-bottom-color: rgba(25, 179, 166, 0.18);
+}
+
 .modal-head h2 {
   margin: 0;
   color: var(--blue-950);
@@ -2100,6 +2119,7 @@ tr:last-child td {
 
 .modal-footer {
   justify-content: flex-end;
+  background: var(--gray-50);
   border-top: 1px solid var(--gray-200);
   border-bottom: 0;
 }
@@ -2117,10 +2137,12 @@ tr:last-child td {
   width: min(360px, calc(100vw - 36px));
   padding: 13px 15px;
   border-left: 4px solid var(--green-600);
-  border-radius: var(--radius);
+  /* Raio maior, alinhado ao acabamento premium das demais fases.
+     Borda lateral semântica (verde/amarelo) preservada. */
+  border-radius: 14px;
   color: var(--blue-950);
   background: var(--white);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow), 0 1px 0 rgba(25, 179, 166, 0.06);
   font-weight: 800;
 }
 
