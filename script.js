@@ -191,6 +191,17 @@ const TRANSFERENCIA_CONFIRMAR_SAIDA_ACTION_RULE = {
   perfis: ["Regulação/Transferências"]
 };
 
+// Etapa 2.2 — Reavaliação de Observação e Estabilização.
+// observacao.reavaliar existe no seed (20260623100004_acesso.sql) e está
+// vinculada a Enfermagem e Médico. A mesma chave cobre os módulos
+// observacaoClinica, observacaoPediatrica, observacaoObstetrica e
+// estabilizacao — todos usam open-observation-reassess-modal e
+// save-observation-reassess com o campo 'modulo' determinando o destino.
+const OBSERVACAO_REAVALIAR_ACTION_RULE = {
+  permissoes: ["observacao.reavaliar"],
+  perfis: ["Enfermagem", "Médico"]
+};
+
 // Varredura final: reset-demo apaga e restaura TODOS os dados do prototipo -
 // somente Administracao deve acionar. Sem permissoes (nao ha chave
 // correspondente), apenas perfil.
@@ -1747,7 +1758,8 @@ function strategicIndicatorRow(indicador, resultado, situacao, base, observacao)
 }
 
 function observationQueueActions(p, modulo, origemLabel, options = {}) {
-  const buttons = [actionButton("Registrar reavaliação", "open-observation-reassess-modal", p.id, `data-modulo="${modulo}"`, "queue-action queue-action-primary")];
+  const buttons = [];
+  if (isActionAllowed(OBSERVACAO_REAVALIAR_ACTION_RULE)) buttons.push(actionButton("Registrar reavaliação", "open-observation-reassess-modal", p.id, `data-modulo="${modulo}"`, "queue-action queue-action-primary"));
   if (isActionAllowed(EXAME_SOLICITAR_ACTION_RULE)) buttons.push(actionButton("Solicitar exame", "open-exam-request", p.id, `data-origem="${origemLabel}"`, "queue-action"));
   if (isActionAllowed(PRESCRICAO_CRIAR_ACTION_RULE)) buttons.push(actionButton("Prescrever medicação", "open-prescription", p.id, "", "queue-action"));
   if (options.includeStabilization && isActionAllowed(OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE)) buttons.push(actionButton("Encaminhar para estabilização", "route-to-stabilization", p.id, "", "queue-action"));
@@ -1815,7 +1827,7 @@ function estabilizacao() {
     escapeHtml(p.nome), tag(p.classificacao), "Cardioscópio, oximetria, PA seriada", status(p.status),
     `<div class="checklist-cell">${checklistBadge(p)}${actionButton("Ver checklist", "open-stabilization-checklist-modal", p.id, "", "queue-action")}</div>`,
     `<div class="actions queue-actions queue-actions-grid">
-      ${actionButton("Registrar reavaliação", "open-observation-reassess-modal", p.id, 'data-modulo="estabilizacao"', "queue-action queue-action-primary")}
+      ${isActionAllowed(OBSERVACAO_REAVALIAR_ACTION_RULE) ? actionButton("Registrar reavaliação", "open-observation-reassess-modal", p.id, 'data-modulo="estabilizacao"', "queue-action queue-action-primary") : ""}
       ${isActionAllowed(TRANSFERENCIA_SOLICITAR_ACTION_RULE) ? actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action") : ""}
       ${isActionAllowed(OBSERVACAO_ALTA_ACTION_RULE) ? actionButton("Dar alta da observação", "discharge-observation", p.id, "", "danger queue-action") : ""}
     </div>`
@@ -3857,6 +3869,16 @@ function handleAction(action, button) {
     showToast("Evolução de enfermagem registrada.");
     closeModal();
     return renderPage("enfermagem");
+  }
+  // Gate Etapa 2.2 — Reavaliação de Observação/Estabilização.
+  // Cobre open-observation-reassess-modal (abertura do modal) e
+  // save-observation-reassess (escrita clinica em localStorage). O gate duplo
+  // garante defesa em profundidade: botao nao aparece (gate visual acima) e,
+  // se acionado por outro meio, a action e bloqueada aqui antes de qualquer
+  // escrita no GsiApi.
+  if (["open-observation-reassess-modal", "save-observation-reassess"].includes(action) && !isActionAllowed(OBSERVACAO_REAVALIAR_ACTION_RULE)) {
+    showToast("Sem permissão para registrar reavaliação.", "warn");
+    return;
   }
   if (action === "open-observation-reassess-modal") return openObservationReassessModal(id, button.dataset.modulo || "observacaoClinica");
   if (action === "save-observation-reassess") {
