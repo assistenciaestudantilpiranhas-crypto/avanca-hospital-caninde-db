@@ -1,0 +1,242 @@
+/*
+ * GSI Design System — Tokens visuais oficiais
+ * GSI HealthTech / GSI ONE
+ *
+ * Fonte: documentos em marca/Brandbook-Institucional-GSI-HealthTech.md
+ * e marca/Manual-Identidade-Visual-GSI-ONE.md.
+ *
+ * Este arquivo é uma PROPOSTA DE TOKENS, isolada e não aplicada ao sistema.
+ * Não é importado por index.html, style.css ou script.js.
+ * Cores funcionais (status/risco) ainda precisam ser conferidas contra
+ * style.css antes de qualquer adoção real (ver Manual, seção 2.3).
+ * HEX da paleta primária são leitura visual da logo de referência e
+ * dependem de confirmação a partir do arquivo vetorial original — a validar.
+ */
+
+:root {
+  /* ===================================================================
+   * 1. CORES PRIMÁRIAS — núcleo da marca (Manual, seção 2.1)
+   * =================================================================== */
+  --gsi-azul-profundo: #0A2A52;   /* Logotipo "GSI", textos institucionais, cabeçalhos, sidebar */
+  --gsi-azul-petroleo: #15406E;   /* Gradientes do símbolo, botões primários, destaques */
+  --gsi-teal: #19B3A6;            /* Logotipo "ONE", ícone de cruz/pulso, indicadores positivos */
+  --gsi-turquesa-claro: #4FD1C5;  /* Gradiente final do símbolo "1", acentos, hover, gráficos */
+
+  /* ===================================================================
+   * 2. CORES NEUTRAS — base institucional (Manual, seção 2.2)
+   * =================================================================== */
+  --gsi-branco: #FFFFFF;          /* Fundos principais, área de respiro, cards */
+  --gsi-cinza-gelo: #F4F6F8;      /* Fundo de páginas e seções secundárias */
+  --gsi-cinza-medio: #D7DCE2;     /* Bordas, divisores, campos desabilitados */
+  --gsi-cinza-texto: #3A3F47;     /* Texto de corpo, parágrafos institucionais */
+  --gsi-azul-cinza-escuro: #13243B; /* Títulos sobre fundo claro */
+
+  /* ===================================================================
+   * 3. CORES FUNCIONAIS — status e classificação de risco
+   * (Manual, seção 2.3 — REFERÊNCIA DOCUMENTAL APENAS.
+   * Tokens realinhados em revisão de comparação (somente leitura em
+   * style.css) para refletirem exatamente as cores reais já utilizadas
+   * e validadas na classificação de risco do sistema (.tag/.risk-card
+   * em style.css). Não substituem a linguagem clínica já validada no
+   * protótipo; ainda não aplicados ao sistema.
+   * =================================================================== */
+  --gsi-risco-vermelho: #D93025;  /* Emergência / sala de estabilização */
+  --gsi-risco-laranja: #EF7D22;   /* Muito urgente */
+  --gsi-risco-amarelo: #D99A00;   /* Urgente / alertas / atenção */
+  --gsi-risco-verde: #169653;     /* Pouco urgente / status concluído-sucesso */
+  --gsi-risco-azul: #276EF1;      /* Não urgente / status informativo */
+
+  /* ===================================================================
+   * 4. GRADIENTE DE MARCA (Manual, seção 4)
+   * Direção oficial: azul petróleo → verde-água/turquesa.
+   * Não criar gradientes fora desta lógica.
+   * =================================================================== */
+  --gsi-gradiente-marca: linear-gradient(135deg, var(--gsi-azul-petroleo) 0%, var(--gsi-teal) 60%, var(--gsi-turquesa-claro) 100%);
+
+  /* ===================================================================
+   * 5. TIPOGRAFIA (Manual, seção 3)
+   * =================================================================== */
+  --gsi-fonte-sistema: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;     /* Interface do produto GSI ONE — telas, tabelas, formulários */
+  --gsi-fonte-institucional: "Sora", "Manrope", "Inter", sans-serif;                            /* Títulos institucionais — brandbook, apresentações, capas, site */
+
+  --gsi-peso-regular: 400;
+  --gsi-peso-medium: 500;
+  --gsi-peso-semibold: 600;
+  --gsi-peso-bold: 700;
+
+  /* Hierarquia tipográfica sugerida (Manual, seção 3.3) */
+  --gsi-tamanho-h1: 2.25rem;   /* 36px — título institucional, referência 32-40px */
+  --gsi-tamanho-h2: 1.625rem; /* 26px — subtítulo, referência 24-28px */
+  --gsi-tamanho-h3: 1.125rem; /* 18px — título de seção, referência 18-20px */
+  --gsi-tamanho-corpo: 0.9375rem; /* 15px — corpo de texto, referência 14-16px */
+  --gsi-tamanho-legenda: 0.8125rem; /* 13px — rótulos/legendas, referência 12-13px */
+
+  /* ===================================================================
+   * 6. PROPORÇÃO DE USO DE COR (Manual, seção 2.4 — regra 60/30/10)
+   * 60% neutros | 30% azul institucional/petróleo | 10% verde-água/turquesa
+   * Token informativo — não consumido diretamente em CSS, apenas guia de uso.
+   * =================================================================== */
+
+  /* ===================================================================
+   * 7. ELEMENTOS GRÁFICOS COMPLEMENTARES (Manual, seção 4)
+   * =================================================================== */
+  --gsi-raio-borda: 10px;                       /* Cards e blocos: 8-12px sugerido */
+  --gsi-sombra-leve: 0 1px 3px rgba(10, 42, 82, 0.08);
+  --gsi-borda-card: 1px solid var(--gsi-cinza-medio);
+
+  /* ===================================================================
+   * 8. TOKENS DE STATUS ADMINISTRATIVO
+   * Criados a partir do mapeamento somente leitura de style.css
+   * (classes .status.warn / .status.good / .status.danger).
+   * "Informação" não tem classe .status.info em style.css hoje —
+   * valores calculados a partir da escala de azul institucional,
+   * SEM ocorrência direta no sistema. A validar visualmente antes
+   * de qualquer uso real. Ainda não aplicados a nenhum arquivo.
+   * =================================================================== */
+  --gsi-status-sucesso-fundo: #E6F6EE;   /* = --green-100 em style.css (valor real) */
+  --gsi-status-sucesso-texto: #0F7441;   /* = --green-700 em style.css (valor real) */
+  --gsi-status-sucesso-borda: #A2D5BA;   /* calculado — sem ocorrência direta em style.css, a validar */
+
+  --gsi-status-alerta-fundo: #FFF6D8;    /* = --yellow-100 em style.css (valor real) */
+  --gsi-status-alerta-texto: #7A5200;    /* = .status.warn em style.css (valor real) */
+  --gsi-status-alerta-borda: #F0DE9C;    /* calculado — sem ocorrência direta em style.css, a validar */
+
+  --gsi-status-perigo-fundo: #FDE8E6;    /* = .status.danger / .table-action.danger:hover em style.css (valor real) */
+  --gsi-status-perigo-texto: #9D2119;    /* = .status.danger em style.css (valor real) */
+  --gsi-status-perigo-borda: #F3C7C3;    /* = .table-action.danger em style.css (valor real) */
+
+  --gsi-status-info-fundo: #E8F1F8;      /* = --blue-100 em style.css (valor real, sem classe .status.info ainda) */
+  --gsi-status-info-texto: #0B2B4C;      /* = --blue-900 em style.css (valor real) */
+  --gsi-status-info-borda: #C3D9EC;      /* calculado — sem ocorrência direta em style.css, a validar */
+
+  /* ===================================================================
+   * 9. VARIAÇÕES CLARAS E ESCURAS DAS CORES DE RISCO
+   * Onde existe valor real equivalente em style.css, ele foi reaproveitado
+   * (marcado "valor real"). Onde não existe, o tom foi calculado por
+   * mistura com branco/preto a partir do --gsi-risco-* correspondente
+   * (marcado "calculado — a validar visualmente").
+   * =================================================================== */
+  --gsi-risco-vermelho-claro: #FDE8E6;   /* valor real (style.css) */
+  --gsi-risco-vermelho-escuro: #9D2119;  /* valor real (style.css) */
+
+  --gsi-risco-laranja-claro: #FBECDF;    /* calculado — a validar visualmente */
+  --gsi-risco-laranja-escuro: #B35E19;   /* calculado — a validar visualmente */
+
+  --gsi-risco-amarelo-claro: #FFF6D8;    /* valor real (style.css, --yellow-100) */
+  --gsi-risco-amarelo-escuro: #A37300;   /* calculado — a validar visualmente */
+
+  --gsi-risco-verde-claro: #E6F6EE;      /* valor real (style.css, --green-100) */
+  --gsi-risco-verde-escuro: #0F7441;     /* valor real (style.css, --green-700) */
+
+  --gsi-risco-azul-claro: #E0E9FE;       /* calculado — a validar visualmente */
+  --gsi-risco-azul-escuro: #1D53B5;      /* calculado — a validar visualmente */
+
+  /* ===================================================================
+   * 10. ESCALA DE AZUIS INSTITUCIONAIS
+   * blue-950/900/800/700/100 reaproveitam exatamente os valores reais
+   * já existentes em style.css (compatibilidade preservada).
+   * blue-50 é novo — não existe em style.css — calculado como tom
+   * ainda mais claro que blue-100, a validar visualmente.
+   * =================================================================== */
+  --gsi-azul-950: #071D35;  /* valor real (style.css, --blue-950) */
+  --gsi-azul-900: #0B2B4C;  /* valor real (style.css, --blue-900) */
+  --gsi-azul-800: #15456D;  /* valor real (style.css, --blue-800) */
+  --gsi-azul-700: #1D5D89;  /* valor real (style.css, --blue-700) */
+  --gsi-azul-100: #E8F1F8;  /* valor real (style.css, --blue-100) */
+  --gsi-azul-50: #F4F8FC;   /* novo — calculado, sem ocorrência em style.css, a validar */
+
+  /* ===================================================================
+   * 11. ESCALA DE CINZAS INSTITUCIONAIS
+   * gray-950/700/100/50 reaproveitam exatamente os valores reais já
+   * existentes em style.css. gray-900, gray-800 e gray-600 são novos —
+   * não existem em style.css — calculados por interpolação entre os
+   * tons reais já confirmados, a validar visualmente.
+   * =================================================================== */
+  --gsi-cinza-950: #1F2933;  /* valor real (style.css, --gray-950) */
+  --gsi-cinza-900: #2B3645;  /* novo — calculado, sem ocorrência em style.css, a validar */
+  --gsi-cinza-800: #364152;  /* novo — calculado, sem ocorrência em style.css, a validar */
+  --gsi-cinza-700: #425466;  /* valor real (style.css, --gray-700) */
+  --gsi-cinza-600: #56697A;  /* novo — calculado, sem ocorrência em style.css, a validar */
+  --gsi-cinza-100: #F4F7FB;  /* valor real (style.css, --gray-100) */
+  --gsi-cinza-50: #F8FAFC;   /* valor real (style.css, --gray-50) */
+
+  /* ===================================================================
+   * 12. TOKENS DE SOMBRA
+   * gsi-sombra-leve já existia (seção 7); os demais reaproveitam
+   * exatamente as 3 sombras nomeadas reais de style.css
+   * (--shadow-soft, --shadow, --shadow-lift), mais uma sombra colorida
+   * de sucesso (botões verdes), calculada a partir do uso real em
+   * style.css (linhas com box-shadow em rgba(22, 150, 83, ...)).
+   * =================================================================== */
+  --gsi-sombra-suave: 0 8px 22px rgba(9, 35, 63, 0.07);    /* valor real (style.css, --shadow-soft) */
+  --gsi-sombra-elevada: 0 14px 30px rgba(9, 35, 63, 0.16); /* valor real (style.css, --shadow-lift) */
+  --gsi-sombra-padrao: 0 20px 48px rgba(9, 35, 63, 0.14);  /* valor real (style.css, --shadow) */
+  --gsi-sombra-sucesso: 0 12px 20px rgba(22, 150, 83, 0.23); /* valor real (style.css, botão/switch verde) */
+
+  /* ===================================================================
+   * 13. TOKENS DE RAIO DE BORDA
+   * gsi-raio-borda (seção 7) já cobre o raio padrão (10px = --radius).
+   * Os demais cobrem os valores "soltos" encontrados no mapeamento
+   * (6px, 12px, 16px, pill 999px, círculo 50%).
+   * =================================================================== */
+  --gsi-raio-pequeno: 7px;    /* valor real (style.css, --radius-sm) */
+  --gsi-raio-medio: 12px;     /* valor real (style.css, ex.: linhas 2238/2276) */
+  --gsi-raio-grande: 16px;    /* valor real (style.css, ex.: linha 2869) */
+  --gsi-raio-pill: 999px;     /* valor real (style.css, tags, badges, switches) */
+  --gsi-raio-circular: 50%;   /* valor real (style.css, avatares, botões circulares) */
+
+  /* ===================================================================
+   * 14. TOKENS DE OVERLAY (branco translúcido sobre fundo escuro)
+   * Calculados a partir do padrão repetido manualmente em style.css
+   * (sidebar, menu lateral, modais escuros, tv-mode) — mesmo valor de
+   * cor-base (branco), variando apenas a opacidade.
+   * =================================================================== */
+  --gsi-overlay-branco-08: rgba(255, 255, 255, 0.08); /* valor real (style.css) */
+  --gsi-overlay-branco-12: rgba(255, 255, 255, 0.12); /* valor real (style.css) */
+  --gsi-overlay-branco-16: rgba(255, 255, 255, 0.16); /* valor real (style.css) */
+  --gsi-overlay-branco-22: rgba(255, 255, 255, 0.22); /* valor real (style.css) */
+
+  /* ===================================================================
+   * 15. TOKENS DE REFERÊNCIA — PAINEL DE CHAMADA / TV-MODE
+   * Documentam o fundo escuro usado no modo telão (.tv-mode/.tv-panel),
+   * hoje escrito diretamente em HEX e duplicado em duas linhas de
+   * style.css, sem variável própria. Mantido como token de REFERÊNCIA
+   * — não é idêntico a --gsi-azul-950, é um tom ainda mais escuro,
+   * usado especificamente nessa tela pública/institucional.
+   * =================================================================== */
+  --gsi-tv-fundo: #06192D;   /* valor real (style.css, .tv-mode / .tv-panel) — distinto de --gsi-azul-950 */
+
+  /* ===================================================================
+   * 16. TOKENS DE REFERÊNCIA — IMPRESSÃO / PRINT
+   * Documentam os valores usados no bloco @media print de style.css,
+   * que são propositalmente isolados com !important. Mantidos aqui
+   * apenas como referência de leitura — NÃO devem ser usados para
+   * substituir o bloco de impressão sem teste dedicado (alto risco
+   * de quebrar relatórios impressos, ver mapeamento anterior).
+   * =================================================================== */
+  --gsi-print-texto: #111827;   /* valor real (style.css, @media print) */
+  --gsi-print-titulo: #071D35;  /* valor real (style.css, @media print) */
+  --gsi-print-texto-secundario: #374151; /* valor real (style.css, @media print) */
+  --gsi-print-borda: #D1D5DB;   /* valor real (style.css, @media print) */
+  --gsi-print-fundo-destaque: #EEF2F7; /* valor real (style.css, @media print) */
+}
+
+/*
+ * ---------------------------------------------------------------------
+ * Próximos passos (não implementados aqui):
+ * 1. Confirmar HEX finais a partir do arquivo vetorial da logo.
+ * 2. Mapear --gsi-risco-* contra as cores reais de style.css (concluído).
+ * 3. Validar visualmente os tokens marcados "calculado — a validar":
+ *    --gsi-status-*-borda (sucesso/alerta/info), --gsi-risco-laranja-claro/escuro,
+ *    --gsi-risco-amarelo-escuro, --gsi-risco-azul-claro/escuro, --gsi-azul-50,
+ *    --gsi-cinza-900/800/600.
+ * 4. Decidir se --gsi-risco-verde também deve ser usado para "sucesso" de UI
+ *    fora do contexto de risco clínico, ou se merece token semântico próprio
+ *    (ver --gsi-status-sucesso-*).
+ * 5. Avaliar com cautela --gsi-tv-fundo (tela pública/institucional) e os
+ *    tokens --gsi-print-* (bloco de impressão isolado com !important)
+ *    antes de qualquer tentativa de tokenização real.
+ * 6. Só então avaliar substituição gradual dos valores hardcoded
+ *    em style.css por estes tokens, com autorização explícita.
+ * ---------------------------------------------------------------------
+ */
