@@ -2914,7 +2914,7 @@ tr:last-child td {
 }
 
 .login-card .brand strong {
-  font-size: 1.05rem;
+  font-size: 1.12rem;
   letter-spacing: 0.01em;
   color: var(--blue-950);
 }
@@ -2935,6 +2935,15 @@ tr:last-child td {
   font-weight: 600;
   letter-spacing: 0.01em;
   text-align: center;
+}
+
+.login-signature-secondary {
+  padding-top: 4px;
+  border-top: 0;
+  color: var(--gray-500);
+  opacity: 0.75;
+  font-size: 0.66rem;
+  font-weight: 500;
 }
 
 .login-card .field span {
