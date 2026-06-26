@@ -174,6 +174,23 @@ const PRESCRICAO_CRIAR_ACTION_RULE = { permissoes: ["prescricao.criar"], perfis:
 const TRANSFERENCIA_SOLICITAR_ACTION_RULE = { permissoes: ["transferencia.solicitar"], perfis: ["Médico"] };
 const OBSERVACAO_ALTA_ACTION_RULE = { perfis: ["Médico"] };
 
+// Etapa 2.2 — Regulação/Transferências: gates para actions pós-solicitação.
+// TRANSFERENCIA_APROVAR_VAGA_ACTION_RULE protege transfer-status (Aprovar vaga
+// e Cancelar), transfer-checklist e confirm-transfer-checklist.
+// TRANSFERENCIA_CONFIRMAR_SAIDA_ACTION_RULE protege transfer-departure, a
+// action de maior impacto assistencial (encerra desfecho do paciente).
+// Ambas as permissoes existem no seed (20260623100004_acesso.sql) e estao
+// vinculadas ao perfil 'Regulação/Transferências'. Administração passa pelo
+// curto-circuito de isActionAllowed, sem necessidade de ser listada aqui.
+const TRANSFERENCIA_APROVAR_VAGA_ACTION_RULE = {
+  permissoes: ["transferencia.aprovar_vaga"],
+  perfis: ["Regulação/Transferências"]
+};
+const TRANSFERENCIA_CONFIRMAR_SAIDA_ACTION_RULE = {
+  permissoes: ["transferencia.confirmar_saida"],
+  perfis: ["Regulação/Transferências"]
+};
+
 // Varredura final: reset-demo apaga e restaura TODOS os dados do prototipo -
 // somente Administracao deve acionar. Sem permissoes (nao ha chave
 // correspondente), apenas perfil.
@@ -1864,7 +1881,7 @@ function openTransferChecklistModal(transferId) {
       ${transferSafetyChecklist.map((item, index) => `<label><input type="checkbox" name="item${index}" required ${complete ? "checked" : ""}> ${escapeHtml(item)}</label>`).join("")}
     </form>
     <p class="muted" style="margin-top:12px">Status atual do checklist: <strong>${escapeHtml(displayText(transfer.checklist || "Pendente"))}</strong></p>
-  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button><button class="action-button" data-action="confirm-transfer-checklist" data-id="${transfer.id}">Confirmar checklist</button>`);
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(TRANSFERENCIA_APROVAR_VAGA_ACTION_RULE) ? `<button class="action-button" data-action="confirm-transfer-checklist" data-id="${transfer.id}">Confirmar checklist</button>` : `<button class="action-button" disabled title="Sem permissão para confirmar checklist de transferência">Confirmar checklist (sem permissão)</button>`}`);
 }
 
 function openObservationReassessModal(patientId, modulo = "observacaoClinica") {
@@ -1956,10 +1973,10 @@ function transferencias() {
       `${escapeHtml(t.paciente)}${paciente?.classificacao ? `<br>${tag(paciente.classificacao)}` : ""}`,
       escapeHtml(displayText(t.motivo)), escapeHtml(displayText(t.destino)), status(t.status), escapeHtml(t.acompanhante), status(t.checklist), escapeHtml(saida),
       `<div class="actions queue-actions queue-actions-grid">
-        ${actionButton("Completar checklist", "transfer-checklist", t.id, "", "queue-action")}
-        ${actionButton("Aprovar vaga", "transfer-status", t.id, 'data-status="Vaga confirmada"', "queue-action queue-action-primary")}
-        ${actionButton("Confirmar saída", "transfer-departure", t.id, "", `queue-action${saidaPendente ? " queue-action-muted" : ""}`)}
-        ${actionButton("Cancelar", "transfer-status", t.id, 'data-status="Cancelado"', "danger queue-action")}
+        ${isActionAllowed(TRANSFERENCIA_APROVAR_VAGA_ACTION_RULE) ? actionButton("Completar checklist", "transfer-checklist", t.id, "", "queue-action") : ""}
+        ${isActionAllowed(TRANSFERENCIA_APROVAR_VAGA_ACTION_RULE) ? actionButton("Aprovar vaga", "transfer-status", t.id, 'data-status="Vaga confirmada"', "queue-action queue-action-primary") : ""}
+        ${isActionAllowed(TRANSFERENCIA_CONFIRMAR_SAIDA_ACTION_RULE) ? actionButton("Confirmar saída", "transfer-departure", t.id, "", `queue-action${saidaPendente ? " queue-action-muted" : ""}`) : ""}
+        ${isActionAllowed(TRANSFERENCIA_APROVAR_VAGA_ACTION_RULE) ? actionButton("Cancelar", "transfer-status", t.id, 'data-status="Cancelado"', "danger queue-action") : ""}
       </div>`
     ];
   });
@@ -3729,6 +3746,23 @@ function handleAction(action, button) {
     showToast("Item adicionado ao estoque.");
     closeModal();
     return renderPage("farmacia");
+  }
+  // Gates Etapa 2.2 — Regulação/Transferências
+  // transfer-status cobre Aprovar vaga (data-status="Vaga confirmada") e
+  // Cancelar (data-status="Cancelado") — ambos exigem aprovar_vaga.
+  // transfer-checklist abre o modal que contem confirm-transfer-checklist;
+  // gatear aqui evita que o modal sequer abra sem permissao.
+  if (["transfer-status", "transfer-checklist"].includes(action) && !isActionAllowed(TRANSFERENCIA_APROVAR_VAGA_ACTION_RULE)) {
+    showToast("Sem permissão para gerenciar regulação de transferência.", "warn");
+    return;
+  }
+  if (action === "confirm-transfer-checklist" && !isActionAllowed(TRANSFERENCIA_APROVAR_VAGA_ACTION_RULE)) {
+    showToast("Sem permissão para confirmar checklist de transferência.", "warn");
+    return;
+  }
+  if (action === "transfer-departure" && !isActionAllowed(TRANSFERENCIA_CONFIRMAR_SAIDA_ACTION_RULE)) {
+    showToast("Sem permissão para confirmar saída de transferência.", "warn");
+    return;
   }
   if (action === "transfer-status") {
     GsiApi.update("transferencias", id, { status: button.dataset.status });
