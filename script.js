@@ -207,6 +207,16 @@ const OBSERVACAO_REAVALIAR_ACTION_RULE = {
 // correspondente), apenas perfil.
 const RESET_DEMO_ACTION_RULE = { perfis: ["Administração"] };
 
+// Etapa 2.2 - Sala de Estabilizacao: estabilizacao.checklist_item existe no
+// seed (20260623100004_acesso.sql) e na RLS (20260623100012_rls_policies.sql)
+// vinculada apenas a Enfermagem - Medico pode consultar a Sala de
+// Estabilizacao, mas nao recebe esta chave, entao nao deve marcar item do
+// checklist (apenas visualizar).
+const ESTABILIZACAO_CHECKLIST_ACTION_RULE = {
+  permissoes: ["estabilizacao.checklist_item"],
+  perfis: ["Enfermagem"]
+};
+
 const operationalProfiles = [
   "Gestor/Administrador",
   "Médico",
@@ -1825,7 +1835,7 @@ function estabilizacao() {
 
   const rows = inQueue.map((p) => [
     escapeHtml(p.nome), tag(p.classificacao), "Cardioscópio, oximetria, PA seriada", status(p.status),
-    `<div class="checklist-cell">${checklistBadge(p)}${actionButton("Ver checklist", "open-stabilization-checklist-modal", p.id, "", "queue-action")}</div>`,
+    `<div class="checklist-cell">${checklistBadge(p)}${isActionAllowed(ESTABILIZACAO_CHECKLIST_ACTION_RULE) ? actionButton("Ver checklist", "open-stabilization-checklist-modal", p.id, "", "queue-action") : '<span class="muted">Sem permissão</span>'}</div>`,
     `<div class="actions queue-actions queue-actions-grid">
       ${isActionAllowed(OBSERVACAO_REAVALIAR_ACTION_RULE) ? actionButton("Registrar reavaliação", "open-observation-reassess-modal", p.id, 'data-modulo="estabilizacao"', "queue-action queue-action-primary") : ""}
       ${isActionAllowed(TRANSFERENCIA_SOLICITAR_ACTION_RULE) ? actionButton("Solicitar transferência", "open-transfer-request", p.id, "", "queue-action") : ""}
@@ -1858,10 +1868,11 @@ function estabilizacao() {
 function stabilizationChecklistModalBody(patient) {
   const { saved, total, done, label } = getPatientChecklistStatus(patient);
   const complete = done === total;
+  const podeMarcarChecklist = isActionAllowed(ESTABILIZACAO_CHECKLIST_ACTION_RULE);
   return `
     <p class="field full"><span>Paciente</span>${escapeHtml(patient.nome)} ${tag(patient.classificacao)}</p>
     <div class="checklist">
-      ${stabilizationSafetyChecklist.map(([id, itemLabel]) => `<label><input type="checkbox" data-action="toggle-stabilization-checklist-item" data-id="${patient.id}" data-item="${id}" ${saved[id] ? "checked" : ""}> ${escapeHtml(itemLabel)}</label>`).join("")}
+      ${stabilizationSafetyChecklist.map(([id, itemLabel]) => `<label><input type="checkbox" data-action="toggle-stabilization-checklist-item" data-id="${patient.id}" data-item="${id}" ${saved[id] ? "checked" : ""} ${podeMarcarChecklist ? "" : 'disabled title="Sem permissão para marcar o checklist de estabilização."'}> ${escapeHtml(itemLabel)}</label>`).join("")}
     </div>
     <p class="muted" style="margin-top:12px">Status do checklist: <strong>${escapeHtml(label)}</strong></p>
     ${complete ? '<p class="muted" style="margin-top:6px">Checklist completo. Paciente permanece em Sala de Estabilização até reavaliação e conduta profissional.</p>' : ""}
@@ -3366,6 +3377,7 @@ const EXAMES_GERENCIAR_GATED_ACTIONS = ["start-collection", "mark-in-progress", 
 const EXAME_SOLICITAR_GATED_ACTIONS = ["open-exam-request", "save-exam"];
 const PRESCRICAO_DISPENSAR_GATED_ACTIONS = ["rx-status"];
 const ESTOQUE_MOVIMENTAR_GATED_ACTIONS = ["open-stock-item", "save-stock"];
+const ESTABILIZACAO_CHECKLIST_GATED_ACTIONS = ["open-stabilization-checklist-modal", "toggle-stabilization-checklist-item"];
 
 function handleAction(action, button) {
   const id = button.dataset.id;
@@ -3411,6 +3423,10 @@ function handleAction(action, button) {
   }
   if (action === "route-to-stabilization" && !isActionAllowed(OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE)) {
     showToast("Sem permissão para encaminhar para a estabilização.", "warn");
+    return;
+  }
+  if (ESTABILIZACAO_CHECKLIST_GATED_ACTIONS.includes(action) && !isActionAllowed(ESTABILIZACAO_CHECKLIST_ACTION_RULE)) {
+    showToast("Sem permissão para marcar o checklist de estabilização.", "warn");
     return;
   }
   if (["open-prescription", "save-prescription"].includes(action) && !isActionAllowed(PRESCRICAO_CRIAR_ACTION_RULE)) {
