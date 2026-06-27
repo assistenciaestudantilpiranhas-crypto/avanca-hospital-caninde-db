@@ -1642,19 +1642,6 @@ function openExamReleaseModal(examId) {
   });
 }
 
-const stabilizationChecklist = [
-  ["acesso-venoso", "Acesso venoso calibroso"],
-  ["oxigenoterapia", "Oxigenoterapia disponível"],
-  ["ecg", "ECG realizado"],
-  ["medicacoes-emergencia", "Medicações de emergência conferidas"],
-  ["transferencia-avaliada", "Transferência avaliada"],
-  ["contato-regulacao", "Contato com regulação registrado"]
-];
-
-function getChecklist(id) {
-  return localStorage.getItem(`gsi_saude_chk_${id}`) !== "off";
-}
-
 const stabilizationSafetyChecklist = [
   ["identificacao", "Identificação do paciente confirmada"],
   ["monitorizacao", "Monitorização instalada"],
@@ -4032,10 +4019,6 @@ function handleAction(action, button) {
     const obs = p?.estabilizacao || { reavaliacoes: [] };
     GsiApi.update("pacientes", id, { status: "Sala de estabilização", desfecho: "Sala de estabilização", estabilizacao: { ...obs, origem: obs.origem || "Observação Clínica", inicio: nowTime(), inicioTimestamp: Date.now() } });
     showToast("Paciente encaminhado para a Sala de Estabilização.");
-    return renderPage(currentPage);
-  }
-  if (action === "toggle-checklist-item") {
-    localStorage.setItem(`gsi_saude_chk_${button.dataset.id}`, button.checked ? "on" : "off");
     return renderPage(currentPage);
   }
   if (action === "open-stabilization-checklist-modal") {
