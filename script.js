@@ -32,20 +32,20 @@ const sectorOptions = [
 // Atencao: isto e controle de UX/visibilidade, NAO e controle de seguranca -
 // a protecao real continua sendo RLS no banco (ver migrations de RLS).
 const routePermissions = {
-  pacientes: { permissoes: ["paciente.criar"], perfis: ["Recepção", "Enfermagem", "Médico"] },
-  atendimentos: { permissoes: ["atendimento.abrir"], perfis: ["Recepção", "Enfermagem", "Médico", "Regulação/Transferências"] },
-  "painel-chamada": { permissoes: ["atendimento.abrir"], perfis: ["Recepção", "Enfermagem", "Médico"] },
-  risco: { permissoes: ["triagem.classificar"], perfis: ["Enfermagem"] },
-  triagem: { permissoes: ["triagem.classificar"], perfis: ["Enfermagem"] },
+  pacientes: { permissoes: ["paciente.criar"], perfis: ["Recepção", "Técnico em Enfermagem", "Médico"] },
+  atendimentos: { permissoes: ["atendimento.abrir"], perfis: ["Recepção", "Técnico em Enfermagem", "Médico", "Regulação de Transferência"] },
+  "painel-chamada": { permissoes: ["atendimento.abrir"], perfis: ["Recepção", "Técnico em Enfermagem", "Médico"] },
+  risco: { permissoes: ["triagem.classificar"], perfis: ["Técnico em Enfermagem"] },
+  triagem: { permissoes: ["triagem.classificar"], perfis: ["Técnico em Enfermagem"] },
   consulta: { permissoes: ["consulta.iniciar", "consulta.registrar_conduta"], perfis: [] },
-  enfermagem: { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Enfermagem"] },
+  enfermagem: { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Técnico em Enfermagem"] },
   farmacia: { permissoes: ["prescricao.dispensar", "estoque.movimentar"], perfis: ["Farmácia"] },
-  exames: { permissoes: ["exame.visualizar", "exame.solicitar"], perfis: ["Diagnóstico/Exames"] },
-  estabilizacao: { permissoes: [], perfis: ["Enfermagem", "Médico"] },
-  "observacao-clinica": { permissoes: ["observacao.reavaliar"], perfis: ["Enfermagem", "Médico"] },
-  "observacao-pediatrica": { permissoes: ["observacao.reavaliar"], perfis: ["Enfermagem", "Médico"] },
-  "observacao-obstetrica": { permissoes: ["observacao.reavaliar"], perfis: ["Enfermagem", "Médico"] },
-  transferencias: { permissoes: ["transferencia.solicitar", "transferencia.aprovar_vaga", "transferencia.confirmar_saida"], perfis: ["Regulação/Transferências"] },
+  exames: { permissoes: ["exame.visualizar", "exame.solicitar"], perfis: ["Técnico em RX"] },
+  estabilizacao: { permissoes: [], perfis: ["Técnico em Enfermagem", "Médico"] },
+  "observacao-clinica": { permissoes: ["observacao.reavaliar"], perfis: ["Técnico em Enfermagem", "Médico"] },
+  "observacao-pediatrica": { permissoes: ["observacao.reavaliar"], perfis: ["Técnico em Enfermagem", "Médico"] },
+  "observacao-obstetrica": { permissoes: ["observacao.reavaliar"], perfis: ["Técnico em Enfermagem", "Médico"] },
+  transferencias: { permissoes: ["transferencia.solicitar", "transferencia.aprovar_vaga", "transferencia.confirmar_saida"], perfis: ["Regulação de Transferência"] },
   // Indicadores e Relatorios restritos somente a Administracao - perfis: []
   // e permissoes: [] fazem isRouteAllowed/isActionAllowed negarem para todo
   // mundo, exceto o curto-circuito de Administracao (hasPerfil("Administração")
@@ -106,7 +106,7 @@ function isActionAllowed(rule) {
 // Triagem/Classificacao (classify-risk, save-risk, open-triage-modal,
 // save-triage, call-to-triage). Demais modulos permanecem sem gate nesta
 // etapa.
-const TRIAGEM_ACTION_RULE = { permissoes: ["triagem.classificar"], perfis: ["Enfermagem"] };
+const TRIAGEM_ACTION_RULE = { permissoes: ["triagem.classificar"], perfis: ["Técnico em Enfermagem"] };
 
 // Expansao da Etapa 2.2: regras de permissao para as actions de
 // Pacientes/Atendimentos (open-register-patient, save-patient, call-patient,
@@ -121,7 +121,7 @@ const ATENDIMENTO_OPEN_ACTION_RULE = { permissoes: ["atendimento.abrir"], perfis
 // e open-prescription NAO recebem gate aqui de proposito - sao botoes
 // reusados tambem em Consulta e Observacao, sem diferenciacao de contexto
 // suficiente ainda (ver analise da expansao para Enfermagem).
-const ENFERMAGEM_ACTION_RULE = { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Enfermagem"] };
+const ENFERMAGEM_ACTION_RULE = { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Técnico em Enfermagem"] };
 
 // Expansao da Etapa 2.2: regras para as actions exclusivas do modulo
 // Consulta Medica. open-exam-request, open-prescription e
@@ -135,9 +135,9 @@ const CONSULTA_CONDUTA_ACTION_RULE = { permissoes: ["consulta.registrar_conduta"
 // modulo Exames (start-collection, mark-in-progress, open-release-modal,
 // save-exam-release, cancel-exam). view-exam-result e print-exam ficam de
 // fora: leitura pura e utilitario sem escrita, respectivamente.
-const EXAMES_GERENCIAR_ACTION_RULE = { permissoes: ["exame.liberar_resultado", "exame.marcar_critico"], perfis: ["Diagnóstico/Exames"] };
+const EXAMES_GERENCIAR_ACTION_RULE = { permissoes: ["exame.liberar_resultado", "exame.marcar_critico"], perfis: ["Técnico em RX"] };
 
-// Decisao de regra de negocio: Enfermagem NAO deve solicitar exame. O gate
+// Decisao de regra de negocio: Tecnico em Enfermagem NAO deve solicitar exame. O gate
 // e por permissao/perfil real do usuario logado, nao por origem/contexto de
 // onde o botao foi renderizado - por isso a mesma regra se aplica de forma
 // uniforme em Consulta, Enfermagem e nas 3 paginas de Observacao (via
@@ -153,14 +153,14 @@ const EXAME_SOLICITAR_ACTION_RULE = { permissoes: ["exame.solicitar"], perfis: [
 const PRESCRICAO_DISPENSAR_ACTION_RULE = { permissoes: ["prescricao.dispensar"], perfis: ["Farmácia"] };
 const ESTOQUE_MOVIMENTAR_ACTION_RULE = { permissoes: ["estoque.movimentar"], perfis: ["Farmácia"] };
 
-// Regra de negocio: Enfermagem nao deve encaminhar paciente da Observacao
+// Regra de negocio: Tecnico em Enfermagem nao deve encaminhar paciente da Observacao
 // para a Sala de Estabilizacao pelo sistema - apenas Medico (e Administracao,
 // pelo curto-circuito de isActionAllowed). Nao ha permissao granular no
 // banco para esta acao (so existe estabilizacao.checklist_item, que e outra
 // responsabilidade), por isso a regra usa somente perfil.
 const OBSERVACAO_ENCAMINHAR_ESTABILIZACAO_ACTION_RULE = { perfis: ["Médico"] };
 
-// Decisao de regra de negocio: Enfermagem (e Farmacia/Recepcao) nao deve
+// Decisao de regra de negocio: Tecnico em Enfermagem (e Farmacia/Recepcao) nao deve
 // prescrever medicacao - apenas Medico. O gate e por permissao/perfil real
 // do usuario logado, nao por origem/contexto de onde o botao foi
 // renderizado - por isso a mesma regra se aplica de forma uniforme em
@@ -180,32 +180,32 @@ const PRESCRICAO_CRIAR_ACTION_RULE = { permissoes: ["prescricao.criar"], perfis:
 const TRANSFERENCIA_SOLICITAR_ACTION_RULE = { permissoes: ["transferencia.solicitar"], perfis: ["Médico"] };
 const OBSERVACAO_ALTA_ACTION_RULE = { perfis: ["Médico"] };
 
-// Etapa 2.2 — Regulação/Transferências: gates para actions pós-solicitação.
+// Etapa 2.2 — Regulação de Transferência: gates para actions pós-solicitação.
 // TRANSFERENCIA_APROVAR_VAGA_ACTION_RULE protege transfer-status (Aprovar vaga
 // e Cancelar), transfer-checklist e confirm-transfer-checklist.
 // TRANSFERENCIA_CONFIRMAR_SAIDA_ACTION_RULE protege transfer-departure, a
 // action de maior impacto assistencial (encerra desfecho do paciente).
 // Ambas as permissoes existem no seed (20260623100004_acesso.sql) e estao
-// vinculadas ao perfil 'Regulação/Transferências'. Administração passa pelo
+// vinculadas ao perfil 'Regulação de Transferência'. Administração passa pelo
 // curto-circuito de isActionAllowed, sem necessidade de ser listada aqui.
 const TRANSFERENCIA_APROVAR_VAGA_ACTION_RULE = {
   permissoes: ["transferencia.aprovar_vaga"],
-  perfis: ["Regulação/Transferências"]
+  perfis: ["Regulação de Transferência"]
 };
 const TRANSFERENCIA_CONFIRMAR_SAIDA_ACTION_RULE = {
   permissoes: ["transferencia.confirmar_saida"],
-  perfis: ["Regulação/Transferências"]
+  perfis: ["Regulação de Transferência"]
 };
 
 // Etapa 2.2 — Reavaliação de Observação e Estabilização.
 // observacao.reavaliar existe no seed (20260623100004_acesso.sql) e está
-// vinculada a Enfermagem e Médico. A mesma chave cobre os módulos
+// vinculada a Técnico em Enfermagem e Médico. A mesma chave cobre os módulos
 // observacaoClinica, observacaoPediatrica, observacaoObstetrica e
 // estabilizacao — todos usam open-observation-reassess-modal e
 // save-observation-reassess com o campo 'modulo' determinando o destino.
 const OBSERVACAO_REAVALIAR_ACTION_RULE = {
   permissoes: ["observacao.reavaliar"],
-  perfis: ["Enfermagem", "Médico"]
+  perfis: ["Técnico em Enfermagem", "Médico"]
 };
 
 // Varredura final: reset-demo apaga e restaura TODOS os dados do prototipo -
@@ -225,12 +225,12 @@ const CONFIGURACOES_ACTION_RULE = {
 
 // Etapa 2.2 - Sala de Estabilizacao: estabilizacao.checklist_item existe no
 // seed (20260623100004_acesso.sql) e na RLS (20260623100012_rls_policies.sql)
-// vinculada apenas a Enfermagem - Medico pode consultar a Sala de
+// vinculada apenas a Tecnico em Enfermagem - Medico pode consultar a Sala de
 // Estabilizacao, mas nao recebe esta chave, entao nao deve marcar item do
 // checklist (apenas visualizar).
 const ESTABILIZACAO_CHECKLIST_ACTION_RULE = {
   permissoes: ["estabilizacao.checklist_item"],
-  perfis: ["Enfermagem"]
+  perfis: ["Técnico em Enfermagem"]
 };
 
 const operationalProfiles = [
@@ -1168,7 +1168,7 @@ function openTriageModal(patientId) {
     </form>
   `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(TRIAGEM_ACTION_RULE)
     ? `<button class="action-button" data-action="save-triage" data-id="${p.id}">Salvar triagem</button>`
-    : `<button class="action-button" disabled title="Apenas o perfil Enfermagem (ou permissão triagem.classificar) pode salvar a triagem">Salvar triagem (sem permissão)</button>`}`);
+    : `<button class="action-button" disabled title="Apenas o perfil Técnico em Enfermagem (ou permissão triagem.classificar) pode salvar a triagem">Salvar triagem (sem permissão)</button>`}`);
 
   const form = byId("triageForm");
   const suggestedInput = form.querySelector('input[name="classificacaoSugerida"]');
@@ -1481,7 +1481,7 @@ function openNursingModal(patientId) {
     </form>
   `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(ENFERMAGEM_ACTION_RULE)
     ? `<button class="action-button" data-action="save-nursing-evolution" data-id="${p.id}">Salvar evolucao</button>`
-    : `<button class="action-button" disabled title="Apenas o perfil Enfermagem (ou permissão enfermagem.evolucao.registrar) pode salvar a evolução">Salvar evolução (sem permissão)</button>`}`);
+    : `<button class="action-button" disabled title="Apenas o perfil Técnico em Enfermagem (ou permissão enfermagem.evolucao.registrar) pode salvar a evolução">Salvar evolução (sem permissão)</button>`}`);
 
   const form = byId("nursingForm");
   const select = form.querySelector('select[name="profissional"]');
@@ -1629,7 +1629,7 @@ function openExamReleaseModal(examId) {
     </form>
   `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(EXAMES_GERENCIAR_ACTION_RULE)
     ? `<button class="action-button" data-action="save-exam-release" data-id="${e.id}">Confirmar liberação</button>`
-    : `<button class="action-button" disabled title="Apenas o perfil Diagnóstico/Exames (ou permissão exame.liberar_resultado/exame.marcar_critico) pode liberar resultados">Confirmar liberação (sem permissão)</button>`}`);
+    : `<button class="action-button" disabled title="Apenas o perfil Técnico em RX (ou permissão exame.liberar_resultado/exame.marcar_critico) pode liberar resultados">Confirmar liberação (sem permissão)</button>`}`);
 
   const form = byId("examReleaseForm");
   const select = form.querySelector('select[name="profissional"]');
@@ -3868,7 +3868,7 @@ function handleAction(action, button) {
     closeModal();
     return renderPage("farmacia");
   }
-  // Gates Etapa 2.2 — Regulação/Transferências
+  // Gates Etapa 2.2 — Regulação de Transferência
   // transfer-status cobre Aprovar vaga (data-status="Vaga confirmada") e
   // Cancelar (data-status="Cancelado") — ambos exigem aprovar_vaga.
   // transfer-checklist abre o modal que contem confirm-transfer-checklist;
