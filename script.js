@@ -17,6 +17,7 @@ const menuItems = [
   ["indicadores", "Indicadores", "IN"],
   ["relatorios", "Relatórios", "RL"],
   ["configuracoes", "Configurações", "CF"],
+  ["auditoria", "Auditoria", "AU"],
   ["sair", "Sair", "SA"]
 ];
 
@@ -54,7 +55,13 @@ const routePermissions = {
   // (perfis_acesso), e Auditoria deixou de ter acesso por decisao de produto.
   indicadores: { permissoes: [], perfis: [] },
   relatorios: { permissoes: [], perfis: [] },
-  configuracoes: { permissoes: ["configuracoes.gerenciar"], perfis: [] }
+  configuracoes: { permissoes: ["configuracoes.gerenciar"], perfis: [] },
+  // Auditoria: somente leitura de public.audit_log. Espelha a RLS real
+  // (is_admin() or is_auditoria()) - perfil "Auditoria" listado aqui,
+  // Administracao continua pelo curto-circuito de isRouteAllowed. Nenhum
+  // outro perfil (Recepção, Técnico em Enfermagem, Médico, Farmácia,
+  // Técnico em RX, Regulação de Transferência) deve acessar.
+  auditoria: { permissoes: [], perfis: ["Auditoria"] }
 };
 
 const ALWAYS_VISIBLE_ROUTES = ["dashboard", "sair"];
@@ -232,6 +239,13 @@ const ESTABILIZACAO_CHECKLIST_ACTION_RULE = {
   permissoes: ["estabilizacao.checklist_item"],
   perfis: ["Técnico em Enfermagem"]
 };
+
+// Modulo Auditoria (Fase 1, somente leitura): nao existe policy de RLS
+// usando has_permission('auditoria.visualizar') hoje - o acesso real a
+// audit_log e' decidido por is_admin() or is_auditoria() (has_perfil
+// ('Auditoria')). Por isso a regra aqui usa somente perfil, sem chave de
+// permissao, espelhando exatamente a RLS vigente.
+const AUDITORIA_ACTION_RULE = { perfis: ["Auditoria"] };
 
 const operationalProfiles = [
   "Gestor/Administrador",
@@ -2773,6 +2787,221 @@ function configuracoes() {
   `;
 }
 
+// =========================================================================
+// Modulo Auditoria (Fase 1 - somente leitura)
+// =========================================================================
+// Le diretamente public.audit_log via window.GsiAuth.client (Supabase) -
+// nao usa GsiApi nem localStorage. Nenhuma escrita: sem botao de editar,
+// excluir ou exportar nesta fase. RLS (is_admin() or is_auditoria()) e' a
+// barreira real; este estado e' so' o cache em memoria do que foi lido.
+let auditoriaState = { loaded: false, loading: false, error: null, eventos: [], usuariosPorId: {} };
+// Filtros aplicados apenas sobre os eventos ja carregados (client-side) -
+// nunca persistidos em banco/localStorage, conforme escopo desta fase.
+let auditoriaFiltros = { tabela: "", acao: "", texto: "" };
+
+async function loadAuditoria() {
+  if (auditoriaState.loading) return;
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    auditoriaState.error = "Sessão não carregada. Não foi possível buscar a auditoria.";
+    return;
+  }
+  auditoriaState.loading = true;
+  auditoriaState.error = null;
+  try {
+    const { data, error } = await window.GsiAuth.client
+      .from("audit_log")
+      .select("id, created_at, usuario_id, tabela_afetada, registro_id, acao, dados_antes, dados_depois")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    const eventos = data || [];
+    const idsUsuarios = [...new Set(eventos.map((evento) => evento.usuario_id).filter(Boolean))];
+    let usuariosPorId = {};
+    if (idsUsuarios.length) {
+      const { data: usuariosData, error: usuariosError } = await window.GsiAuth.client
+        .from("usuarios")
+        .select("id, nome, email")
+        .in("id", idsUsuarios);
+      if (usuariosError) throw usuariosError;
+      (usuariosData || []).forEach((usuario) => { usuariosPorId[usuario.id] = usuario; });
+    }
+    auditoriaState.eventos = eventos;
+    auditoriaState.usuariosPorId = usuariosPorId;
+    auditoriaState.loaded = true;
+  } catch (err) {
+    console.error("GSI Auditoria: erro ao carregar audit_log", err);
+    auditoriaState.error = "Não foi possível carregar os registros de auditoria. Tente novamente.";
+  } finally {
+    auditoriaState.loading = false;
+    if (currentPage === "auditoria") {
+      content.innerHTML = pages.auditoria();
+      attachAuditoriaFilterListeners();
+    }
+  }
+}
+
+// Os campos de filtro só existem no DOM depois que os dados terminam de
+// carregar (enquanto carregando/erro, a tela nao renderiza os <select>/
+// <input> de filtro) - por isso esta funcao precisa ser chamada tanto em
+// renderPage() quanto no fim de loadAuditoria(), nunca só uma vez.
+function attachAuditoriaFilterListeners() {
+  const filtroTabela = byId("auditoriaFiltroTabela");
+  if (filtroTabela) filtroTabela.addEventListener("change", () => {
+    auditoriaFiltros.tabela = filtroTabela.value;
+    renderAuditoriaTabela();
+  });
+  const filtroAcao = byId("auditoriaFiltroAcao");
+  if (filtroAcao) filtroAcao.addEventListener("change", () => {
+    auditoriaFiltros.acao = filtroAcao.value;
+    renderAuditoriaTabela();
+  });
+  const filtroTexto = byId("auditoriaFiltroTexto");
+  if (filtroTexto) filtroTexto.addEventListener("input", () => {
+    auditoriaFiltros.texto = filtroTexto.value;
+    renderAuditoriaTabela();
+  });
+}
+
+function auditoriaUsuarioLabel(usuarioId) {
+  if (!usuarioId) return "Sistema/migração";
+  const usuario = auditoriaState.usuariosPorId[usuarioId];
+  if (usuario) return usuario.nome || usuario.email || usuarioId;
+  return `${String(usuarioId).slice(0, 8)}…`;
+}
+
+function auditoriaAcaoLabel(acao) {
+  const labels = { insert: "Inserção", update: "Atualização", delete: "Exclusão", bootstrap_admin: "Inicialização (bootstrap)" };
+  return labels[acao] || acao || "—";
+}
+
+function auditoriaResumoAlteracao(evento) {
+  if (evento.acao === "insert") return "Registro criado.";
+  if (evento.acao === "delete") return "Registro removido.";
+  if (evento.acao === "update") {
+    const antes = evento.dados_antes || {};
+    const depois = evento.dados_depois || {};
+    const chaves = [...new Set([...Object.keys(antes), ...Object.keys(depois)])];
+    const alteradas = chaves.filter((chave) => JSON.stringify(antes[chave]) !== JSON.stringify(depois[chave]));
+    if (!alteradas.length) return "Sem alterações de campo detectadas.";
+    return `Campos alterados: ${alteradas.slice(0, 5).join(", ")}${alteradas.length > 5 ? "…" : ""}`;
+  }
+  return "Evento administrativo registrado.";
+}
+
+function auditoriaDataHora(iso) {
+  if (!iso) return "—";
+  const data = new Date(iso);
+  if (Number.isNaN(data.getTime())) return "—";
+  return data.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function auditoriaCardsResumo(eventos) {
+  const total = eventos.length;
+  const hojeStr = new Date().toDateString();
+  const hoje = eventos.filter((evento) => evento.created_at && new Date(evento.created_at).toDateString() === hojeStr).length;
+  const usuarios = new Set(eventos.map((evento) => evento.usuario_id || "sistema")).size;
+  const porTabela = {};
+  eventos.forEach((evento) => { porTabela[evento.tabela_afetada] = (porTabela[evento.tabela_afetada] || 0) + 1; });
+  const tabelaTopEntry = Object.entries(porTabela).sort((a, b) => b[1] - a[1])[0];
+  const tabelaTop = tabelaTopEntry ? `${tabelaTopEntry[0]} (${tabelaTopEntry[1]})` : "Sem dados";
+  return { total, hoje, usuarios, tabelaTop };
+}
+
+function auditoriaEventosFiltrados() {
+  const { tabela, acao, texto } = auditoriaFiltros;
+  const termo = texto.trim().toLowerCase();
+  return auditoriaState.eventos.filter((evento) => {
+    if (tabela && evento.tabela_afetada !== tabela) return false;
+    if (acao && evento.acao !== acao) return false;
+    if (termo) {
+      const haystack = `${evento.tabela_afetada} ${evento.acao} ${evento.registro_id} ${auditoriaUsuarioLabel(evento.usuario_id)}`.toLowerCase();
+      if (!haystack.includes(termo)) return false;
+    }
+    return true;
+  });
+}
+
+function auditoriaTabelaHtml() {
+  const filtrados = auditoriaEventosFiltrados();
+  if (!filtrados.length) return '<p class="muted">Nenhum evento de auditoria encontrado com os filtros atuais.</p>';
+  const rows = filtrados.map((evento) => [
+    escapeHtml(auditoriaDataHora(evento.created_at)),
+    escapeHtml(auditoriaUsuarioLabel(evento.usuario_id)),
+    escapeHtml(auditoriaAcaoLabel(evento.acao)),
+    escapeHtml(evento.tabela_afetada || "—"),
+    `<code>${escapeHtml(String(evento.registro_id || "").slice(0, 8))}…</code>`,
+    escapeHtml(auditoriaResumoAlteracao(evento))
+  ]);
+  return table(["Data/hora", "Usuário", "Ação", "Tabela", "Registro", "Resumo da alteração"], rows);
+}
+
+function renderAuditoriaTabela() {
+  const wrap = byId("auditoriaTableWrap");
+  if (wrap) wrap.innerHTML = auditoriaTabelaHtml();
+}
+
+function auditoria() {
+  const podeVerAuditoria = isActionAllowed(AUDITORIA_ACTION_RULE);
+  const carregando = auditoriaState.loading || (!auditoriaState.loaded && !auditoriaState.error);
+  if (!podeVerAuditoria) {
+    return `
+      ${pageHead("Auditoria", "Trilha de auditoria do sistema - somente leitura.")}
+      <section class="grid"><div class="panel"><p class="muted">Sem permissão para visualizar a auditoria. Acesso restrito à Administração e ao perfil Auditoria.</p></div></section>
+    `;
+  }
+  if (carregando) {
+    return `
+      ${pageHead("Auditoria", "Trilha de auditoria do sistema - somente leitura.")}
+      <section class="grid"><div class="panel"><p class="muted">Carregando registros de auditoria...</p></div></section>
+    `;
+  }
+  if (auditoriaState.error) {
+    return `
+      ${pageHead("Auditoria", "Trilha de auditoria do sistema - somente leitura.")}
+      <section class="grid"><div class="panel"><p class="muted">${escapeHtml(auditoriaState.error)}</p></div></section>
+    `;
+  }
+  const eventos = auditoriaState.eventos;
+  const cards = auditoriaCardsResumo(eventos);
+  const tabelasDistintas = [...new Set(eventos.map((evento) => evento.tabela_afetada))].sort();
+  const acoesDistintas = [...new Set(eventos.map((evento) => evento.acao))].sort();
+  return `
+    ${pageHead("Auditoria", "Trilha de auditoria do sistema - somente leitura. Últimos 100 eventos registrados em audit_log.")}
+    <section class="grid module-stats">
+      ${metric("Total de eventos carregados", cards.total, "Últimos 100 eventos de audit_log")}
+      ${metric("Eventos hoje", cards.hoje, "Registrados no dia atual")}
+      ${metric("Usuários envolvidos", cards.usuarios, "Inclui \"Sistema/migração\"")}
+      ${metric("Tabela mais alterada", cards.tabelaTop, "Entre os eventos carregados")}
+    </section>
+    ${eventos.length === 0 ? '<section class="grid"><div class="panel"><p class="muted">Nenhum evento de auditoria registrado ainda.</p></div></section>' : `
+    <section class="panel">
+      <h2>Filtros</h2>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+        <label class="field full"><span>Tabela</span>
+          <select id="auditoriaFiltroTabela">
+            <option value="">Todas</option>
+            ${tabelasDistintas.map((t) => `<option value="${escapeHtml(t)}" ${auditoriaFiltros.tabela === t ? "selected" : ""}>${escapeHtml(t)}</option>`).join("")}
+          </select>
+        </label>
+        <label class="field full"><span>Operação</span>
+          <select id="auditoriaFiltroAcao">
+            <option value="">Todas</option>
+            ${acoesDistintas.map((a) => `<option value="${escapeHtml(a)}" ${auditoriaFiltros.acao === a ? "selected" : ""}>${escapeHtml(auditoriaAcaoLabel(a))}</option>`).join("")}
+          </select>
+        </label>
+        <label class="field full"><span>Busca livre</span>
+          <input id="auditoriaFiltroTexto" type="search" placeholder="Tabela, ação, usuário ou registro" value="${escapeHtml(auditoriaFiltros.texto)}">
+        </label>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>Eventos</h2>
+      <div id="auditoriaTableWrap">${auditoriaTabelaHtml()}</div>
+    </section>
+    `}
+  `;
+}
+
 const pages = {
   dashboard,
   pacientes,
@@ -2793,6 +3022,7 @@ const pages = {
   indicadores,
   relatorios,
   configuracoes,
+  auditoria,
   sair: () => pageHead("Sair", "A sessão deste sistema é gerenciada pelo Supabase Auth. Para encerrar sua sessão, use o botão \"Encerrar sessão\" no menu do usuário, no topo da tela.")
 };
 
@@ -2821,12 +3051,14 @@ function renderPage(pageId = currentPage) {
   if (sectorSelect) sectorSelect.value = sectorOptions.some(([, id]) => id === currentPage) ? currentPage : "";
   content.innerHTML = pages[currentPage]();
   if (currentPage === "configuracoes" && isActionAllowed(CONFIGURACOES_ACTION_RULE)) loadConfiguracoesSistema();
+  if (currentPage === "auditoria" && isActionAllowed(AUDITORIA_ACTION_RULE)) loadAuditoria();
   content.querySelectorAll(".table-wrap").forEach((wrap) => { wrap.scrollLeft = 0; });
   content.focus({ preventScroll: true });
   window.location.hash = currentPage;
   closeMenu();
   const search = byId("patientSearch");
   if (search) search.addEventListener("input", () => filterPatients(search.value));
+  attachAuditoriaFilterListeners();
   if (tvRefreshTimer) {
     clearInterval(tvRefreshTimer);
     tvRefreshTimer = null;
