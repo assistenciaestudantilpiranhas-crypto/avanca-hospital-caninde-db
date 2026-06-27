@@ -46,8 +46,14 @@ const routePermissions = {
   "observacao-pediatrica": { permissoes: ["observacao.reavaliar"], perfis: ["Enfermagem", "Médico"] },
   "observacao-obstetrica": { permissoes: ["observacao.reavaliar"], perfis: ["Enfermagem", "Médico"] },
   transferencias: { permissoes: ["transferencia.solicitar", "transferencia.aprovar_vaga", "transferencia.confirmar_saida"], perfis: ["Regulação/Transferências"] },
-  indicadores: { permissoes: [], perfis: ["Auditoria", "Gestão Hospitalar", "Leitura/Gestor"] },
-  relatorios: { permissoes: [], perfis: ["Auditoria", "Gestão Hospitalar", "Leitura/Gestor"] },
+  // Indicadores e Relatorios restritos somente a Administracao - perfis: []
+  // e permissoes: [] fazem isRouteAllowed/isActionAllowed negarem para todo
+  // mundo, exceto o curto-circuito de Administracao (hasPerfil("Administração")
+  // em isRouteAllowed). Antes listavam perfis "Auditoria", "Gestão Hospitalar"
+  // e "Leitura/Gestor" - os dois ultimos nunca existiram no seed real
+  // (perfis_acesso), e Auditoria deixou de ter acesso por decisao de produto.
+  indicadores: { permissoes: [], perfis: [] },
+  relatorios: { permissoes: [], perfis: [] },
   configuracoes: { permissoes: ["configuracoes.gerenciar"], perfis: [] }
 };
 
@@ -327,7 +333,7 @@ function pageHead(title, description, actionLabel = "", actionName = "") {
   return `
     <div class="page-head">
       <div>
-        <span class="eyebrow">GSI Saude</span>
+        <span class="eyebrow">GSI ONE</span>
         <h1>${title}</h1>
         <p>${description}</p>
       </div>
@@ -967,7 +973,7 @@ function painelTv() {
     <main class="tv-panel">
       <header class="tv-header">
         <span>Hospital Municipal Haydée Carvalho Leite Santos</span>
-        <strong>GSI Saúde</strong>
+        <strong>GSI ONE</strong>
         <h1>Painel de Chamada</h1>
         <div class="tv-audio-control">
           <span class="${audio.active ? "is-active" : ""}">${audio.label}</span>
@@ -2528,7 +2534,7 @@ function openMobilidadeReportModal() {
   openModal("Relatório de Mobilidade Assistencial", `
     <section class="section-gap report-cover">
       <p class="report-org">Hospital Municipal Haydée Carvalho Leite Santos</p>
-      <p class="report-system">GSI Saúde</p>
+      <p class="report-system">GSI ONE</p>
       <p class="report-observatory">Observatório da Mobilidade Assistencial de Canindé</p>
       <h2 style="margin:0">Relatório Técnico Demonstrativo</h2>
       <p class="report-place">Canindé de São Francisco/SE</p>
@@ -2671,7 +2677,7 @@ function openMobilidadeReportModal() {
     </section>
 
     <section class="section-gap">
-      <p class="muted">Documento demonstrativo gerado pelo protótipo GSI Saúde. Dados fictícios. Uso exclusivo para validação de metodologia e apresentação institucional.</p>
+      <p class="muted">Documento demonstrativo gerado pelo protótipo GSI ONE. Dados fictícios. Uso exclusivo para validação de metodologia e apresentação institucional.</p>
     </section>
   `, `<button class="secondary-action" data-action="close-modal">Fechar</button><button class="action-button" data-action="print-report">Imprimir / salvar PDF</button>`);
 
