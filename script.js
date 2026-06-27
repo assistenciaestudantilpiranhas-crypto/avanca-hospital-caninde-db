@@ -207,6 +207,16 @@ const OBSERVACAO_REAVALIAR_ACTION_RULE = {
 // correspondente), apenas perfil.
 const RESET_DEMO_ACTION_RULE = { perfis: ["Administração"] };
 
+// Fase 2B (Configuracoes reais): configuracoes.gerenciar existe no seed e
+// na RLS de public.configuracoes_sistema (migration
+// 20260623100019_configuracoes_sistema.sql), vinculada apenas a
+// Administracao - nenhum outro perfil (incluindo Auditoria) deve ler ou
+// alterar.
+const CONFIGURACOES_ACTION_RULE = {
+  permissoes: ["configuracoes.gerenciar"],
+  perfis: ["Administração"]
+};
+
 // Etapa 2.2 - Sala de Estabilizacao: estabilizacao.checklist_item existe no
 // seed (20260623100004_acesso.sql) e na RLS (20260623100012_rls_policies.sql)
 // vinculada apenas a Enfermagem - Medico pode consultar a Sala de
@@ -2674,29 +2684,96 @@ function relatorios() {
   return `${pageHead("Relatórios", "Área demonstrativa para emissão de relatórios operacionais e gerenciais.")}<section class="grid report-grid">${reports.map((r) => `<article class="report-card"><strong>${r}</strong><p class="muted">Modelo pronto para filtros por período, setor e classificação.</p><button class="secondary-action" type="button" data-action="generate-report" data-nome="${escapeHtml(r)}">Gerar</button></article>`).join("")}</section>`;
 }
 
+// Etapa 2.2 (Fase 2B): chaves alinhadas com os seeds reais de
+// public.configuracoes_sistema (migration 20260623100019_configuracoes_sistema.sql)
+// - nao sao mais preferencias ficticias de localStorage, e sim flags de
+// ativacao de modulo persistidas no banco/Supabase.
 const configToggles = [
-  ["notif-email", "Notificações por e-mail", "Avisos de prescrições pendentes e resultados críticos."],
-  ["notif-painel", "Exibir alertas no painel de chamada", "Mostra avisos sonoros e visuais na tela pública."],
-  ["auditoria", "Registro de auditoria", "Mantém histórico de alterações nos módulos assistenciais."],
-  ["dupla-checagem", "Dupla checagem na dispensação", "Exige confirmação adicional para medicamentos controlados."]
+  ["modulo_pacientes_ativo", "Módulo Pacientes", "Ativa o módulo Pacientes no sistema."],
+  ["modulo_atendimentos_ativo", "Módulo Atendimentos", "Ativa o módulo Atendimentos no sistema."],
+  ["modulo_triagem_ativo", "Módulo Triagem / Classificação de Risco", "Ativa o módulo Triagem no sistema."],
+  ["modulo_consulta_ativo", "Módulo Consulta", "Ativa o módulo Consulta no sistema."],
+  ["modulo_estabilizacao_ativo", "Módulo Sala de Estabilização", "Ativa o módulo Sala de Estabilização no sistema."],
+  ["modulo_transferencias_ativo", "Módulo Transferências", "Ativa o módulo Transferências no sistema."],
+  ["modulo_relatorios_ativo", "Módulo Relatórios", "Ativa o módulo Relatórios no sistema."]
 ];
 
+// Estado em memoria das configuracoes reais carregadas de
+// public.configuracoes_sistema via window.GsiAuth.client. Nao usa
+// localStorage como fonte nem como fallback - se a leitura falhar,
+// loaded permanece false e a tela mostra aviso, sem inventar estado.
+let configSistemaState = { loaded: false, loading: false, error: null, valores: {} };
+
 function getConfig(id) {
-  return localStorage.getItem(`gsi_saude_cfg_${id}`) !== "off";
+  return configSistemaState.valores[id] !== false;
+}
+
+// Busca as configuracoes reais no Supabase. Chamada pela navegacao para a
+// rota "configuracoes" (ver renderPage) e reaplicada a cada visita a tela -
+// nao ha cache permanente, para refletir alteracoes feitas por outra
+// sessao de Administracao. Reentrancia protegida por "loading".
+async function loadConfiguracoesSistema() {
+  if (configSistemaState.loading) return;
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    configSistemaState.error = "Sessão não carregada. Não foi possível buscar as configurações.";
+    return;
+  }
+  configSistemaState.loading = true;
+  configSistemaState.error = null;
+  try {
+    const { data, error } = await window.GsiAuth.client
+      .from("configuracoes_sistema")
+      .select("chave, valor")
+      .in("chave", configToggles.map(([chave]) => chave));
+    if (error) throw error;
+    const valores = {};
+    (data || []).forEach((row) => {
+      valores[row.chave] = !!(row.valor && row.valor.ativo);
+    });
+    configSistemaState.valores = valores;
+    configSistemaState.loaded = true;
+  } catch (err) {
+    console.error("GSI Configurações: erro ao carregar configuracoes_sistema", err);
+    configSistemaState.error = "Não foi possível carregar as configurações do servidor. Tente novamente.";
+  } finally {
+    configSistemaState.loading = false;
+    if (currentPage === "configuracoes") content.innerHTML = pages.configuracoes();
+  }
+}
+
+// Persiste uma unica chave em public.configuracoes_sistema. So' atualiza
+// (nunca insere) - os 7 registros ja existem via seed da migration, e esta
+// fase nao cria CRUD novo de chaves. RLS/permissao real continuam sendo a
+// barreira de seguranca; isto e' so' o cliente HTTP autenticado.
+async function saveConfiguracaoSistema(chave, ativo) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada.");
+  }
+  const usuario = typeof window.GsiAuth.getCurrentUser === "function" ? window.GsiAuth.getCurrentUser() : null;
+  const { error } = await window.GsiAuth.client
+    .from("configuracoes_sistema")
+    .update({ valor: { ativo }, updated_by: usuario ? usuario.id : null })
+    .eq("chave", chave);
+  if (error) throw error;
 }
 
 function configuracoes() {
+  const podeGerenciarConfig = isActionAllowed(CONFIGURACOES_ACTION_RULE);
+  const carregando = configSistemaState.loading || (!configSistemaState.loaded && !configSistemaState.error);
   return `
     ${pageHead("Configurações", "Parâmetros estruturais do protótipo para usuários, perfis, setores, salas e protocolos.")}
     <section class="grid two-column">
       <div class="panel">
         <h2>Preferências do sistema</h2>
-        ${configToggles.map(([id, label, desc]) => `
+        ${!podeGerenciarConfig ? '<p class="muted">Sem permissão para visualizar/alterar configurações. Acesso restrito à Administração.</p>' : ""}
+        ${podeGerenciarConfig && carregando ? '<p class="muted">Carregando configurações...</p>' : ""}
+        ${podeGerenciarConfig && configSistemaState.error ? `<p class="muted">${escapeHtml(configSistemaState.error)}</p>` : ""}
+        ${podeGerenciarConfig ? configToggles.map(([id, label, desc]) => `
           <div class="switch-row">
             <div><strong style="display:block">${label}</strong><small class="muted">${desc}</small></div>
-            <label class="switch"><input type="checkbox" data-action="toggle-config" data-id="${id}" ${getConfig(id) ? "checked" : ""}><span></span></label>
+            <label class="switch"><input type="checkbox" data-action="toggle-config" data-id="${id}" ${getConfig(id) ? "checked" : ""} ${(carregando || configSistemaState.error) ? "disabled" : ""}><span></span></label>
           </div>
-        `).join("")}
+        `).join("") : ""}
       </div>
       <div class="panel"><h2>Módulos estruturais</h2><div class="grid" style="grid-template-columns:1fr">${["Usuários", "Perfis de acesso", "Setores", "Salas", "Protocolos", "Parâmetros assistenciais"].map((item) => `<div class="switch-row"><span>${item}</span><button class="secondary-action" type="button" data-action="generic-toast">Configurar</button></div>`).join("")}</div></div>
     </section>
@@ -2750,6 +2827,7 @@ function renderPage(pageId = currentPage) {
   if (currentPage !== "painel-tv") renderNav(currentPage);
   if (sectorSelect) sectorSelect.value = sectorOptions.some(([, id]) => id === currentPage) ? currentPage : "";
   content.innerHTML = pages[currentPage]();
+  if (currentPage === "configuracoes" && isActionAllowed(CONFIGURACOES_ACTION_RULE)) loadConfiguracoesSistema();
   content.querySelectorAll(".table-wrap").forEach((wrap) => { wrap.scrollLeft = 0; });
   content.focus({ preventScroll: true });
   window.location.hash = currentPage;
@@ -3378,6 +3456,7 @@ const EXAME_SOLICITAR_GATED_ACTIONS = ["open-exam-request", "save-exam"];
 const PRESCRICAO_DISPENSAR_GATED_ACTIONS = ["rx-status"];
 const ESTOQUE_MOVIMENTAR_GATED_ACTIONS = ["open-stock-item", "save-stock"];
 const ESTABILIZACAO_CHECKLIST_GATED_ACTIONS = ["open-stabilization-checklist-modal", "toggle-stabilization-checklist-item"];
+const CONFIGURACOES_GATED_ACTIONS = ["toggle-config"];
 
 function handleAction(action, button) {
   const id = button.dataset.id;
@@ -3443,6 +3522,14 @@ function handleAction(action, button) {
   }
   if (action === "reset-demo" && !isActionAllowed(RESET_DEMO_ACTION_RULE)) {
     showToast("Sem permissão para restaurar dados demo.", "warn");
+    return;
+  }
+  if (CONFIGURACOES_GATED_ACTIONS.includes(action) && !isActionAllowed(CONFIGURACOES_ACTION_RULE)) {
+    // O navegador ja alterna button.checked antes do evento de click chegar
+    // aqui - reverter explicitamente para nao deixar a UI mostrar um valor
+    // que nao foi (e nao podera ser) persistido.
+    button.checked = !button.checked;
+    showToast("Sem permissão para alterar configurações.", "warn");
     return;
   }
   if (action === "open-register-patient") return openRegisterPatient();
@@ -3856,8 +3943,23 @@ function handleAction(action, button) {
   }
   if (action === "print-report") return window.print();
   if (action === "toggle-config") {
-    localStorage.setItem(`gsi_saude_cfg_${button.dataset.id}`, button.checked ? "on" : "off");
-    showToast("Preferência atualizada.");
+    const chave = button.dataset.id;
+    const novoValor = button.checked;
+    const valorAnterior = getConfig(chave);
+    button.disabled = true;
+    saveConfiguracaoSistema(chave, novoValor)
+      .then(() => {
+        configSistemaState.valores[chave] = novoValor;
+        showToast("Preferência atualizada.");
+      })
+      .catch((err) => {
+        console.error("GSI Configurações: erro ao salvar configuracoes_sistema", err);
+        button.checked = valorAnterior;
+        showToast("Não foi possível salvar a configuração. Tente novamente.", "warn");
+      })
+      .finally(() => {
+        button.disabled = !isActionAllowed(CONFIGURACOES_ACTION_RULE);
+      });
     return;
   }
   if (action === "discharge-observation") {
