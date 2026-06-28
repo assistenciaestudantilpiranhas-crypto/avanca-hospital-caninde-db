@@ -634,6 +634,49 @@ async function createPacienteRealFromLocal(payload) {
   return data;
 }
 
+// Passo 3 (Fase 1) - atualiza APENAS o cadastro estavel em public.pacientes
+// (mesmos 7 campos de createPacienteRealFromLocal), nunca status/fluxo.
+// pacienteLocal e' o objeto local completo (precisa de pacienteSupabaseId,
+// quando existir) - payload e' o formulario de edicao (mesmos nomes de
+// campo de save-patient: nome, nascimento, cpf, sus, telefone, municipio,
+// perfil).
+//
+// Estrategia adotada para pacientes antigos sem pacienteSupabaseId:
+// (B) cria o vinculo real agora, com os dados atuais do formulario de
+// edicao, em vez de bloquear a edicao (A) ou ignorar pacientes antigos (C).
+// E' seguro porque reaproveita createPacienteRealFromLocal sem nenhuma
+// logica nova de insercao - o paciente local so' "ganha" pacienteSupabaseId
+// uma unica vez (no primeiro update apos esta mudanca); a partir dai,
+// toda edicao futura cai no ramo de UPDATE abaixo, sem risco de duplicar.
+async function updatePacienteRealFromLocal(pacienteLocal, payload) {
+  if (!pacienteLocal.pacienteSupabaseId) {
+    return createPacienteRealFromLocal(payload);
+  }
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível atualizar o paciente no servidor.");
+  }
+  const dataNascimentoIso = parseDateBRParaISO(payload.nascimento);
+  if (!dataNascimentoIso) {
+    throw new Error("Data de nascimento inválida. Use o formato DD/MM/AAAA.");
+  }
+  const { data, error } = await window.GsiAuth.client
+    .from("pacientes")
+    .update({
+      nome: payload.nome,
+      data_nascimento: dataNascimentoIso,
+      cpf: payload.cpf || null,
+      cartao_sus: payload.sus || null,
+      telefone: payload.telefone || null,
+      municipio: payload.municipio,
+      perfil_residencia: payload.perfil || null
+    })
+    .eq("id", pacienteLocal.pacienteSupabaseId)
+    .select("id, nome, data_nascimento, cpf, cartao_sus, telefone, municipio, perfil_residencia")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 function setPatientTimeIfMissing(id, field) {
   const patient = patientById(id);
   if (!patient || patient[field]) return patient;
