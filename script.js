@@ -609,6 +609,57 @@ function parseDateBRParaISO(dataBR) {
   return `${ano}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;
 }
 
+function friendlySupabaseError(err, fallback = "Não foi possível concluir a operação. Tente novamente.") {
+  const text = normalizeText(`${err?.message || ""} ${err?.details || ""} ${err?.hint || ""} ${err?.code || ""} ${err?.status || ""}`);
+  if (text.includes("data de nascimento invalida") || text.includes("formato dd/mm/aaaa") || text.includes("invalid input syntax for type date")) {
+    return "Informe a data de nascimento no formato DD/MM/AAAA.";
+  }
+  if (text.includes("failed to fetch") || text.includes("network") || text.includes("fetch") || text.includes("load failed")) {
+    return "Não foi possível conectar ao servidor. Verifique a conexão e tente novamente.";
+  }
+  if (text.includes("row-level security") || text.includes("permission denied") || text.includes("not authorized") || text.includes("forbidden") || text.includes("403") || text.includes("42501")) {
+    return "Você não tem permissão para realizar esta ação.";
+  }
+  if (text.includes("duplicate key") || text.includes("unique constraint") || text.includes("23505") || text.includes("duplicidade")) {
+    return "Já existe um paciente cadastrado com estes dados.";
+  }
+  return fallback;
+}
+
+function hasPacienteIdentity(value) {
+  return Boolean(String(value || "").trim());
+}
+
+async function findPacienteRealDuplicado(payload) {
+  const cpf = String(payload.cpf || "").trim();
+  const cartaoSus = String(payload.sus || "").trim();
+  if (!hasPacienteIdentity(cpf) && !hasPacienteIdentity(cartaoSus)) return null;
+
+  const selectPaciente = "id, nome, data_nascimento, cpf, cartao_sus, telefone, municipio, perfil_residencia";
+
+  if (hasPacienteIdentity(cpf)) {
+    const { data, error } = await window.GsiAuth.client
+      .from("pacientes")
+      .select(selectPaciente)
+      .eq("cpf", cpf)
+      .limit(1);
+    if (error) throw error;
+    if ((data || [])[0]) return data[0];
+  }
+
+  if (hasPacienteIdentity(cartaoSus)) {
+    const { data, error } = await window.GsiAuth.client
+      .from("pacientes")
+      .select(selectPaciente)
+      .eq("cartao_sus", cartaoSus)
+      .limit(1);
+    if (error) throw error;
+    if ((data || [])[0]) return data[0];
+  }
+
+  return null;
+}
+
 // Passo 2 (Fase 1) - cria APENAS o cadastro estavel em public.pacientes via
 // window.GsiAuth.client (Supabase real) - nunca GsiApi, nunca service_role,
 // nunca bypassa RLS (a policy pacientes_insert_recepcao_admin decide quem
@@ -624,6 +675,8 @@ async function createPacienteRealFromLocal(payload) {
   if (!dataNascimentoIso) {
     throw new Error("Data de nascimento inválida. Use o formato DD/MM/AAAA.");
   }
+  const pacienteExistente = await findPacienteRealDuplicado(payload);
+  if (pacienteExistente) return { ...pacienteExistente, _alreadyExisted: true };
   const { data, error } = await window.GsiAuth.client
     .from("pacientes")
     .insert({
@@ -4185,7 +4238,7 @@ function handleAction(action, button) {
         // (sem precisar de um novo round-trip via loadPacientesReais()).
         GsiApi.create("pacientes", { ...payload, status: "Aguardando triagem", horaChegada: nowTime(), horaChegadaTs: Date.now(), pacienteSupabaseId: pacienteReal.id });
         pacientesReaisState.porId[pacienteReal.id] = pacienteReal;
-        showToast("Paciente cadastrado e adicionado na tabela.");
+        showToast(pacienteReal._alreadyExisted ? "Paciente já existia no cadastro real. Registro local vinculado ao cadastro existente." : "Paciente cadastrado e adicionado na tabela.");
         closeModal();
         renderPage("pacientes");
       })
@@ -4198,7 +4251,7 @@ function handleAction(action, button) {
         console.error("GSI Pacientes reais: erro ao criar paciente real", err);
         button.disabled = false;
         button.textContent = textoOriginalBotao;
-        showToast(err?.message || "Não foi possível cadastrar o paciente no servidor. Tente novamente.", "warn");
+        showToast(friendlySupabaseError(err, "Não foi possível cadastrar o paciente no servidor. Tente novamente."), "warn");
       });
     return;
   }
@@ -4234,7 +4287,7 @@ function handleAction(action, button) {
         console.error("GSI Pacientes reais: erro ao atualizar cadastro do paciente", err);
         button.disabled = false;
         button.textContent = textoOriginalBotao;
-        showToast(err?.message || "Não foi possível atualizar o cadastro no servidor. Tente novamente.", "warn");
+        showToast(friendlySupabaseError(err, "Não foi possível atualizar o cadastro no servidor. Tente novamente."), "warn");
       });
     return;
   }
