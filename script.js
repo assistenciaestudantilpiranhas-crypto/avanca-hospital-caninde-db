@@ -511,8 +511,82 @@ function requireForm(form) {
   return true;
 }
 
+// Fase 1 (Passo 1) - Pacientes reais no Supabase: infraestrutura de LEITURA
+// apenas. Nao cria, nao atualiza, nao grava pacienteSupabaseId ainda - so
+// permite que pacientes locais que JA tenham pacienteSupabaseId (definido
+// manualmente ou em fase futura) sejam enriquecidos com o cadastro real,
+// sem perder nenhum campo clinico local. Cadastro estavel apenas - status,
+// classificacao, queixa, triagem, consulta, observacao, estabilizacao,
+// transferencia, exames, prescricao e desfecho continuam 100% no GsiApi/
+// localStorage, conforme escopo aprovado da Fase 1.
+let pacientesReaisState = { loaded: false, loading: false, error: null, porId: {} };
+
+// public.pacientes.data_nascimento vem como "YYYY-MM-DD" (tipo date do
+// Postgres) - os objetos locais usam "DD/MM/AAAA" (ver initialData em
+// api.js). Converte sem depender de fuso horario (evita off-by-one de
+// new Date() em alguns navegadores para datas puras).
+function formatDateBR(isoDate) {
+  if (!isoDate) return "";
+  const [ano, mes, dia] = String(isoDate).split("-");
+  if (!ano || !mes || !dia) return String(isoDate);
+  return `${dia}/${mes}/${ano}`;
+}
+
+async function loadPacientesReais() {
+  if (pacientesReaisState.loading) return;
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    pacientesReaisState.error = "Sessão não carregada. Não foi possível buscar pacientes reais.";
+    return;
+  }
+  pacientesReaisState.loading = true;
+  pacientesReaisState.error = null;
+  try {
+    const { data, error } = await window.GsiAuth.client
+      .from("pacientes")
+      .select("id, nome, data_nascimento, cpf, cartao_sus, telefone, municipio, perfil_residencia");
+    if (error) throw error;
+    const porId = {};
+    (data || []).forEach((paciente) => { porId[paciente.id] = paciente; });
+    pacientesReaisState.porId = porId;
+    pacientesReaisState.loaded = true;
+  } catch (err) {
+    // Falha de rede/RLS/sessao nao deve impedir o uso do sistema local - o
+    // protótipo continua 100% funcional com os dados de GsiApi/localStorage,
+    // que nunca dependem deste carregamento.
+    console.error("GSI Pacientes reais: erro ao carregar public.pacientes", err);
+    pacientesReaisState.error = "Não foi possível sincronizar pacientes reais com o servidor.";
+  } finally {
+    pacientesReaisState.loading = false;
+  }
+}
+
+// Mesma lista local de sempre, com os 7 campos de cadastro sobrescritos
+// pelo registro real quando paciente.pacienteSupabaseId existir e estiver
+// presente no cache ja carregado. Nenhum campo clinico e tocado - todo o
+// resto do objeto local (status, classificacao, queixa, triagem, consulta,
+// observacao*, estabilizacao, checklistEstabilizacao, evolucoesEnfermagem,
+// desfecho etc.) permanece exatamente como esta no localStorage.
+function listPacientesCompat() {
+  const locais = GsiApi.list("pacientes");
+  return locais.map((paciente) => {
+    if (!paciente.pacienteSupabaseId) return paciente;
+    const real = pacientesReaisState.porId[paciente.pacienteSupabaseId];
+    if (!real) return paciente;
+    return {
+      ...paciente,
+      nome: real.nome,
+      nascimento: formatDateBR(real.data_nascimento),
+      cpf: real.cpf,
+      sus: real.cartao_sus,
+      telefone: real.telefone,
+      municipio: real.municipio,
+      perfil: real.perfil_residencia
+    };
+  });
+}
+
 function patientById(id) {
-  return GsiApi.list("pacientes").find((p) => p.id === id);
+  return listPacientesCompat().find((p) => p.id === id);
 }
 
 function setPatientTimeIfMissing(id, field) {
@@ -3052,6 +3126,13 @@ function renderPage(pageId = currentPage) {
   content.innerHTML = pages[currentPage]();
   if (currentPage === "configuracoes" && isActionAllowed(CONFIGURACOES_ACTION_RULE)) loadConfiguracoesSistema();
   if (currentPage === "auditoria" && isActionAllowed(AUDITORIA_ACTION_RULE)) loadAuditoria();
+  // Fase 1 (Passo 1) - Pacientes reais: so' busca quando a rota atual ja foi
+  // resolvida como "pacientes"/"atendimentos" pelo proprio renderPage acima
+  // (se o usuario nao tivesse permissao, currentPage ja teria sido forcado
+  // para "dashboard" antes desta linha) - nao bloqueia a renderizacao local
+  // se a busca falhar, ja que loadPacientesReais() so atualiza o cache em
+  // memoria e nunca lanca exception para fora de si mesma.
+  if (currentPage === "pacientes" || currentPage === "atendimentos") loadPacientesReais();
   content.querySelectorAll(".table-wrap").forEach((wrap) => { wrap.scrollLeft = 0; });
   content.focus({ preventScroll: true });
   window.location.hash = currentPage;
