@@ -589,6 +589,51 @@ function patientById(id) {
   return listPacientesCompat().find((p) => p.id === id);
 }
 
+// Inverso de formatDateBR: formulario local usa "DD/MM/AAAA" (texto livre,
+// sem input type=date), public.pacientes.data_nascimento exige "YYYY-MM-DD"
+// (date, not null). Retorna null se o valor nao puder ser interpretado -
+// quem chama decide o que fazer (aqui, createPacienteRealFromLocal lanca
+// erro antes de tentar o insert, em vez de mandar uma data invalida pro banco).
+function parseDateBRParaISO(dataBR) {
+  const partes = String(dataBR || "").trim().split("/");
+  if (partes.length !== 3) return null;
+  const [dia, mes, ano] = partes;
+  if (!/^\d{1,2}$/.test(dia) || !/^\d{1,2}$/.test(mes) || !/^\d{4}$/.test(ano)) return null;
+  return `${ano}-${mes.padStart(2, "0")}-${dia.padStart(2, "0")}`;
+}
+
+// Passo 2 (Fase 1) - cria APENAS o cadastro estavel em public.pacientes via
+// window.GsiAuth.client (Supabase real) - nunca GsiApi, nunca service_role,
+// nunca bypassa RLS (a policy pacientes_insert_recepcao_admin decide quem
+// pode, este codigo so' tenta). Nao envia nenhum campo clinico/fluxo - so'
+// os 7 campos de cadastro que realmente existem na tabela real. Lanca erro
+// (nao retorna null/undefined) para o handler de save-patient decidir o
+// que fazer em caso de falha - nunca cria fallback local silencioso aqui.
+async function createPacienteRealFromLocal(payload) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível cadastrar o paciente no servidor.");
+  }
+  const dataNascimentoIso = parseDateBRParaISO(payload.nascimento);
+  if (!dataNascimentoIso) {
+    throw new Error("Data de nascimento inválida. Use o formato DD/MM/AAAA.");
+  }
+  const { data, error } = await window.GsiAuth.client
+    .from("pacientes")
+    .insert({
+      nome: payload.nome,
+      data_nascimento: dataNascimentoIso,
+      cpf: payload.cpf || null,
+      cartao_sus: payload.sus || null,
+      telefone: payload.telefone || null,
+      municipio: payload.municipio,
+      perfil_residencia: payload.perfil || null
+    })
+    .select("id, nome, data_nascimento, cpf, cartao_sus, telefone, municipio, perfil_residencia")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 function setPatientTimeIfMissing(id, field) {
   const patient = patientById(id);
   if (!patient || patient[field]) return patient;
@@ -4048,10 +4093,35 @@ function handleAction(action, button) {
   if (action === "save-patient") {
     const form = byId("patientForm");
     if (!requireForm(form)) return;
-    GsiApi.create("pacientes", { ...formValues(form), status: "Aguardando triagem", horaChegada: nowTime(), horaChegadaTs: Date.now() });
-    showToast("Paciente cadastrado e adicionado na tabela.");
-    closeModal();
-    return renderPage("pacientes");
+    if (button.disabled) return;
+    const payload = formValues(form);
+    const textoOriginalBotao = button.textContent;
+    button.disabled = true;
+    button.textContent = "Salvando...";
+    createPacienteRealFromLocal(payload)
+      .then((pacienteReal) => {
+        // Cadastro real criado com sucesso - cria o registro local (status/
+        // fila/demonstrativo, fora do escopo desta fase) com a referencia
+        // pacienteSupabaseId, e ja popula o cache em memoria diretamente
+        // (sem precisar de um novo round-trip via loadPacientesReais()).
+        GsiApi.create("pacientes", { ...payload, status: "Aguardando triagem", horaChegada: nowTime(), horaChegadaTs: Date.now(), pacienteSupabaseId: pacienteReal.id });
+        pacientesReaisState.porId[pacienteReal.id] = pacienteReal;
+        showToast("Paciente cadastrado e adicionado na tabela.");
+        closeModal();
+        renderPage("pacientes");
+      })
+      .catch((err) => {
+        // Nao cria fallback local silencioso de proposito - se o cadastro
+        // real falhar (rede, RLS, validacao), o paciente NAO e criado em
+        // lugar nenhum, para nao divergir Supabase/localStorage as
+        // escondidas do usuario. Modal permanece aberto com os dados
+        // digitados intactos (nenhum reset de formulario acontece aqui).
+        console.error("GSI Pacientes reais: erro ao criar paciente real", err);
+        button.disabled = false;
+        button.textContent = textoOriginalBotao;
+        showToast(err?.message || "Não foi possível cadastrar o paciente no servidor. Tente novamente.", "warn");
+      });
+    return;
   }
   if (action === "save-exam") {
     const form = byId("examForm");
