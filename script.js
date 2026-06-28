@@ -123,6 +123,13 @@ const TRIAGEM_ACTION_RULE = { permissoes: ["triagem.classificar"], perfis: ["Té
 const PACIENTE_CREATE_ACTION_RULE = { permissoes: ["paciente.criar"], perfis: ["Recepção"] };
 const ATENDIMENTO_OPEN_ACTION_RULE = { permissoes: ["atendimento.abrir"], perfis: ["Recepção"] };
 
+// Passo 4 (Fase 1) - edicao cadastral do paciente (somente os 7 campos de
+// public.pacientes). Reaproveita paciente.criar (nao existe permissao
+// "paciente.editar" no seed, e o escopo desta fase pede para NAO criar
+// permissao nova) - mesma chave/perfil de PACIENTE_CREATE_ACTION_RULE,
+// Administracao continua pelo curto-circuito de isActionAllowed.
+const PACIENTE_EDIT_ACTION_RULE = { permissoes: ["paciente.criar"], perfis: ["Recepção"] };
+
 // Expansao da Etapa 2.2: regra para as actions exclusivas do modulo
 // Enfermagem (open-nursing-modal, save-nursing-evolution). open-exam-request
 // e open-prescription NAO recebem gate aqui de proposito - sao botoes
@@ -928,6 +935,7 @@ function patientTimesCell(patient) {
 function patientActionsCell(p) {
   return `<div class="actions queue-actions queue-actions-grid">
     ${actionButton("Ver prontuário", "view-patient", p.id, "", "queue-action queue-action-primary")}
+    ${isActionAllowed(PACIENTE_EDIT_ACTION_RULE) ? actionButton("Editar cadastro", "open-edit-patient-modal", p.id, "", "queue-action") : ""}
   </div>`;
 }
 
@@ -3331,6 +3339,29 @@ function openRegisterPatient() {
   });
 }
 
+// Passo 4 (Fase 1) - edicao cadastral do paciente. Somente os 7 campos
+// reais de public.pacientes - nao reabre status/queixa/triagem/consulta/
+// observacao/estabilizacao/transferencia/exames/prescricao (campo
+// "queixa" do cadastro inicial e' demonstrativo/local, fora do escopo
+// desta edicao de proposito).
+function openEditPatientModal(patientId) {
+  const p = patientById(patientId);
+  if (!p) return;
+  openModal("Editar cadastro do paciente", `
+    <form id="editPatientForm" class="form-grid">
+      ${field("Nome", "nome", p.nome)}
+      ${field("Nascimento", "nascimento", p.nascimento, "", false)}
+      ${field("CPF", "cpf", p.cpf)}
+      ${field("Cartão SUS", "sus", p.sus)}
+      ${field("Telefone", "telefone", p.telefone)}
+      ${field("Município", "municipio", p.municipio)}
+      ${selectField("Perfil do paciente", "perfil", ["Residente de Canindé de São Francisco", "Residente de povoado/zona rural", "Turista", "Visitante familiar", "Trabalhador temporário", "Pessoa em trânsito", "Residente de outro município"], p.perfil)}
+    </form>
+  `, `<button class="secondary-action" data-action="close-modal">Cancelar</button>${isActionAllowed(PACIENTE_EDIT_ACTION_RULE)
+    ? `<button class="action-button" data-action="save-edit-patient" data-id="${p.id}">Salvar cadastro</button>`
+    : `<button class="action-button" disabled title="Apenas Recepção/Administração (ou permissão paciente.criar) podem editar cadastro do paciente">Salvar cadastro (sem permissão)</button>`}`);
+}
+
 function openRiskModal(id) {
   const p = patientById(id);
   openModal("Classificação de risco", `
@@ -3841,6 +3872,7 @@ classificação de risco.</pre>
 
 const TRIAGEM_GATED_ACTIONS = ["classify-risk", "save-risk", "open-triage-modal", "save-triage", "call-to-triage"];
 const PACIENTE_CREATE_GATED_ACTIONS = ["open-register-patient", "save-patient"];
+const PACIENTE_EDIT_GATED_ACTIONS = ["open-edit-patient-modal", "save-edit-patient"];
 const ATENDIMENTO_OPEN_GATED_ACTIONS = ["call-patient", "start-care"];
 const ENFERMAGEM_GATED_ACTIONS = ["open-nursing-modal", "save-nursing-evolution"];
 const CONSULTA_INICIAR_GATED_ACTIONS = ["call-to-consult", "open-start-consult-modal", "save-start-consult", "save-call-consult"];
@@ -3860,6 +3892,10 @@ function handleAction(action, button) {
   }
   if (PACIENTE_CREATE_GATED_ACTIONS.includes(action) && !isActionAllowed(PACIENTE_CREATE_ACTION_RULE)) {
     showToast("Você não tem permissão para cadastrar pacientes.", "warn");
+    return;
+  }
+  if (PACIENTE_EDIT_GATED_ACTIONS.includes(action) && !isActionAllowed(PACIENTE_EDIT_ACTION_RULE)) {
+    showToast("Sem permissão para editar cadastro do paciente.", "warn");
     return;
   }
   if (ATENDIMENTO_OPEN_GATED_ACTIONS.includes(action) && !isActionAllowed(ATENDIMENTO_OPEN_ACTION_RULE)) {
@@ -4163,6 +4199,42 @@ function handleAction(action, button) {
         button.disabled = false;
         button.textContent = textoOriginalBotao;
         showToast(err?.message || "Não foi possível cadastrar o paciente no servidor. Tente novamente.", "warn");
+      });
+    return;
+  }
+  if (action === "open-edit-patient-modal") return openEditPatientModal(id);
+  if (action === "save-edit-patient") {
+    const form = byId("editPatientForm");
+    if (!requireForm(form)) return;
+    if (button.disabled) return;
+    const pacienteLocal = patientById(id);
+    if (!pacienteLocal) return;
+    const payload = formValues(form);
+    const textoOriginalBotao = button.textContent;
+    button.disabled = true;
+    button.textContent = "Salvando...";
+    updatePacienteRealFromLocal(pacienteLocal, payload)
+      .then((pacienteReal) => {
+        // Mesmo padrao de save-patient: real primeiro, local depois. O
+        // merge do GsiApi.update preserva todos os campos clinicos/fluxo
+        // existentes (status, classificacao, queixa, triagem, consulta,
+        // observacao*, estabilizacao, checklistEstabilizacao,
+        // evolucoesEnfermagem, transferencia, exames, prescricao etc.) -
+        // nenhum deles e mencionado em "payload" (que so' tem os 7 campos
+        // de cadastro do formulario de edicao), entao o spread no objeto
+        // existente nao os apaga.
+        GsiApi.update("pacientes", pacienteLocal.id, { ...payload, pacienteSupabaseId: pacienteReal.id });
+        pacientesReaisState.porId[pacienteReal.id] = pacienteReal;
+        showToast("Cadastro do paciente atualizado.");
+        closeModal();
+        renderPage(currentPage);
+      })
+      .catch((err) => {
+        // Sem fallback local silencioso - mesma regra de save-patient.
+        console.error("GSI Pacientes reais: erro ao atualizar cadastro do paciente", err);
+        button.disabled = false;
+        button.textContent = textoOriginalBotao;
+        showToast(err?.message || "Não foi possível atualizar o cadastro no servidor. Tente novamente.", "warn");
       });
     return;
   }
