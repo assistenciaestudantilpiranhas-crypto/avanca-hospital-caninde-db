@@ -249,3 +249,67 @@ Podem ser sugeridas melhorias como:
 
 Essas melhorias devem ser apresentadas como propostas, não implementadas automaticamente sem autorização.
 
+
+---
+
+# GHAES Alignment — Database Repository
+
+This repository follows GHAES — Global Health AI Engineering Standard.
+
+Reference:
+https://github.com/erickgomesal/ghaes
+
+## Mandatory Rules for AI Agents
+
+1. Follow GHAES principles.
+2. Make surgical changes.
+3. Never rewrite migrations unnecessarily.
+4. Never change clinical workflow persistence without explicit approval.
+5. Never weaken Row Level Security.
+6. Never remove auditability.
+7. Never expose sensitive health data.
+8. Never create fake production data.
+9. Never commit without explicit authorization.
+10. Never push without explicit authorization.
+
+## Database Safety Rules
+
+Before making database changes, always identify:
+
+- affected tables;
+- affected migrations;
+- affected RLS policies;
+- affected functions or triggers;
+- impact on patient data;
+- impact on healthcare workflow;
+- impact on auditability;
+- validation method.
+
+## Protected Areas
+
+The following areas require explicit approval before changes:
+
+- patient data tables;
+- attendance and clinical records;
+- RLS policies;
+- user roles and permissions;
+- audit logs;
+- authentication logic;
+- migration history;
+- production configuration;
+- any healthcare workflow rule.
+
+## Final Response Format
+
+At the end of each task, Claude Code must report:
+
+1. Summary
+2. Files changed
+3. Database objects changed
+4. New migration name, if any
+5. RLS/security impact
+6. Healthcare workflow impact
+7. Validation performed
+8. Risks
+9. Pending decisions
+10. Commit/push status
