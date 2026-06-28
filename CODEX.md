@@ -1,4 +1,14 @@
-﻿# CODEX.md — Database Repository Instructions
+﻿# Mandatory GHAES Session Startup
+
+At the start of each AI-assisted development session, read `GHAES-SESSION.md` once and apply it for the entire session.
+
+Do not re-read all standard files before every prompt unless the task is sensitive, unclear or explicitly requires it.
+
+This repository follows GHAES — Global Health AI Engineering Standard:
+https://github.com/erickgomesal/ghaes
+
+---
+# CODEX.md — Database Repository Instructions
 
 This repository follows GHAES — Global Health AI Engineering Standard.
 
@@ -59,3 +69,4 @@ Every task must report:
 - validation performed;
 - risks;
 - whether commit or push was performed.
+
