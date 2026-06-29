@@ -567,6 +567,70 @@ async function loadPacientesReais() {
   }
 }
 
+// Fase 2 (Passo 1) - Atendimentos reais: mesma infraestrutura de LEITURA
+// usada para Pacientes na Fase 1 (ver pacientesReaisState/loadPacientesReais
+// acima), agora para public.atendimentos. Nao cria, nao atualiza, nao
+// migra nenhuma action de fluxo (start-care, save-triage, save-start-
+// consult, save-conduct, discharge-*, route-to-stabilization, transfer-
+// departure continuam 100% locais/GsiApi). porPacienteId existe para
+// permitir, em fase futura, localizar o atendimento real de um paciente
+// sem precisar guardar a ponte no objeto local ainda.
+let atendimentosReaisState = { loaded: false, loading: false, error: null, porId: {}, porPacienteId: {} };
+
+async function loadAtendimentosReais() {
+  if (atendimentosReaisState.loading) return;
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    atendimentosReaisState.error = "Sessão não carregada. Não foi possível buscar atendimentos reais.";
+    return;
+  }
+  atendimentosReaisState.loading = true;
+  atendimentosReaisState.error = null;
+  try {
+    const { data, error } = await window.GsiAuth.client
+      .from("atendimentos")
+      .select("id, paciente_id, status_id, classificacao_risco_id, desfecho_id, queixa_principal, etapa_atual, setor_atual, hora_chegada_ts, hora_desfecho_ts, pacientes(nome, cpf, cartao_sus)");
+    if (error) throw error;
+    const porId = {};
+    const porPacienteId = {};
+    (data || []).forEach((atendimento) => {
+      porId[atendimento.id] = atendimento;
+      if (atendimento.paciente_id) porPacienteId[atendimento.paciente_id] = atendimento;
+    });
+    atendimentosReaisState.porId = porId;
+    atendimentosReaisState.porPacienteId = porPacienteId;
+    atendimentosReaisState.loaded = true;
+  } catch (err) {
+    // Mesma regra de pacientesReaisState: falha de rede/RLS/sessao nunca
+    // impede o uso do sistema local - so registra o erro para diagnostico,
+    // e o protótipo continua 100% funcional com GsiApi/localStorage.
+    console.error("GSI Atendimentos reais: erro ao carregar public.atendimentos", err);
+    atendimentosReaisState.error = "Não foi possível sincronizar atendimentos reais com o servidor.";
+  } finally {
+    atendimentosReaisState.loading = false;
+  }
+}
+
+function atendimentoRealById(id) {
+  return atendimentosReaisState.porId[id] || null;
+}
+
+// Mesma lista local de sempre (GsiApi.list("atendimentos")) - hoje nenhum
+// atendimento local tem "atendimentoSupabaseId" (essa ponte ainda nao e
+// criada por nenhuma action nesta fase), entao esta funcao e' hoje um
+// passthrough seguro. Fica pronta para os proximos passos da Fase 2: se/
+// quando a ponte existir, anexa o registro real correspondente em
+// "atendimentoReal" sem sobrescrever nenhum campo local (status, etapa,
+// queixa, timestamps) - leitura apenas, fluxo assistencial nao muda.
+function listAtendimentosCompat() {
+  const locais = GsiApi.list("atendimentos");
+  return locais.map((atendimento) => {
+    if (!atendimento.atendimentoSupabaseId) return atendimento;
+    const real = atendimentosReaisState.porId[atendimento.atendimentoSupabaseId];
+    if (!real) return atendimento;
+    return { ...atendimento, atendimentoReal: real };
+  });
+}
+
 // Mesma lista local de sempre, com os 7 campos de cadastro sobrescritos
 // pelo registro real quando paciente.pacienteSupabaseId existir e estiver
 // presente no cache ja carregado. Nenhum campo clinico e tocado - todo o
@@ -3282,6 +3346,14 @@ function renderPage(pageId = currentPage) {
   // se a busca falhar, ja que loadPacientesReais() so atualiza o cache em
   // memoria e nunca lanca exception para fora de si mesma.
   if (currentPage === "pacientes" || currentPage === "atendimentos") loadPacientesReais();
+  // Fase 2 (Passo 1) - Atendimentos reais: mesma logica de guarda da linha
+  // acima - so dispara para as paginas relacionadas ao fluxo assistencial,
+  // nunca bloqueia a renderizacao local se a busca falhar.
+  if ([
+    "atendimentos", "triagem", "consulta", "enfermagem",
+    "observacao-clinica", "observacao-pediatrica", "observacao-obstetrica",
+    "estabilizacao", "transferencias", "indicadores", "relatorios"
+  ].includes(currentPage)) loadAtendimentosReais();
   content.querySelectorAll(".table-wrap").forEach((wrap) => { wrap.scrollLeft = 0; });
   content.focus({ preventScroll: true });
   window.location.hash = currentPage;
