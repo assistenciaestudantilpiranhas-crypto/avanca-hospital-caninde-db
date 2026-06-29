@@ -1128,10 +1128,27 @@ function patientTimesCell(patient) {
   `;
 }
 
+// Fase 2 (Passo 3) - elegibilidade para o botao "Iniciar atendimento".
+// Paciente so' e elegivel no estagio inicial (logo apos save-patient,
+// antes de qualquer start-care ja confirmado) - qualquer status posterior
+// (Em atendimento, Triagem concluida, Em consulta, observacao*, sala de
+// estabilizacao, transferencia, altas, obito, evasao/desistencia) torna o
+// paciente inelegivel. Checagem extra de atendimentoSupabaseId e' defesa
+// em profundidade contra estado local inconsistente (mesma logica de
+// duplicidade ja usada dentro do handler de start-care).
+function isPatientEligibleForStartCare(patient = {}) {
+  if (!patient?.id) return false;
+  if (patient.status !== "Aguardando triagem") return false;
+  const atendimentoExistente = GsiApi.list("atendimentos").find((a) => a.pacienteId === patient.id);
+  if (atendimentoExistente && atendimentoExistente.atendimentoSupabaseId) return false;
+  return true;
+}
+
 function patientActionsCell(p) {
   return `<div class="actions queue-actions queue-actions-grid">
     ${actionButton("Ver prontuário", "view-patient", p.id, "", "queue-action queue-action-primary")}
     ${isActionAllowed(PACIENTE_EDIT_ACTION_RULE) ? actionButton("Editar cadastro", "open-edit-patient-modal", p.id, "", "queue-action") : ""}
+    ${isActionAllowed(ATENDIMENTO_OPEN_ACTION_RULE) && isPatientEligibleForStartCare(p) ? actionButton("Iniciar atendimento", "start-care", p.id, "", "queue-action queue-action-primary") : ""}
   </div>`;
 }
 
