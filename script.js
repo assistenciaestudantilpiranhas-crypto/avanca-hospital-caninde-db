@@ -661,6 +661,56 @@ async function getStatusAtendimentoIdByCodigo(codigo) {
   return id;
 }
 
+// Fase 2 (Passo 4) - cache de dom_classificacao_risco (id real por
+// codigo), mesmo padrao lazy-load de statusAtendimentoState. Codigos reais:
+// azul, verde, amarelo, laranja, vermelho (sem acento, minusculo) - a
+// classificacao local usa "Azul"/"Verde"/"Amarelo"/"Laranja"/"Vermelho"
+// (capitalizado), por isso quem chama getClassificacaoRiscoIdByCodigo deve
+// normalizar antes (ver mapeamento em updateAtendimentoRealTriagem).
+let classificacaoRiscoState = { loaded: false, loading: false, error: null, porCodigo: {} };
+
+async function loadClassificacaoRiscoDomain() {
+  if (classificacaoRiscoState.loading || classificacaoRiscoState.loaded) return;
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    classificacaoRiscoState.error = "Sessão não carregada. Não foi possível carregar as classificações de risco.";
+    return;
+  }
+  classificacaoRiscoState.loading = true;
+  classificacaoRiscoState.error = null;
+  try {
+    const { data, error } = await window.GsiAuth.client
+      .from("dom_classificacao_risco")
+      .select("id, codigo");
+    if (error) throw error;
+    const porCodigo = {};
+    (data || []).forEach((row) => { porCodigo[row.codigo] = row.id; });
+    classificacaoRiscoState.porCodigo = porCodigo;
+    classificacaoRiscoState.loaded = true;
+  } catch (err) {
+    console.error("GSI Atendimentos reais: erro ao carregar dom_classificacao_risco", err);
+    classificacaoRiscoState.error = "Não foi possível carregar as classificações de risco do servidor.";
+  } finally {
+    classificacaoRiscoState.loading = false;
+  }
+}
+
+// Lanca erro amigavel (controlado) se o codigo nao existir/for invalido -
+// nunca retorna null/undefined silenciosamente, para nao deixar um UPDATE
+// em atendimentos prosseguir com classificacao_risco_id invalido.
+async function getClassificacaoRiscoIdByCodigo(codigo) {
+  if (!codigo) {
+    throw new Error("Classificação de risco inválida. Revise a triagem antes de salvar.");
+  }
+  if (!classificacaoRiscoState.loaded) {
+    await loadClassificacaoRiscoDomain();
+  }
+  const id = classificacaoRiscoState.porCodigo[codigo];
+  if (!id) {
+    throw new Error("Classificação de risco inválida. Revise a triagem antes de salvar.");
+  }
+  return id;
+}
+
 // Mesma lista local de sempre (GsiApi.list("atendimentos")) - hoje nenhum
 // atendimento local tem "atendimentoSupabaseId" (essa ponte ainda nao e
 // criada por nenhuma action nesta fase), entao esta funcao e' hoje um
@@ -733,6 +783,9 @@ function friendlySupabaseError(err, fallback = "Não foi possível concluir a op
   }
   if (text.includes("duplicate key") || text.includes("unique constraint") || text.includes("23505") || text.includes("duplicidade")) {
     return "Já existe um paciente cadastrado com estes dados.";
+  }
+  if (text.includes("classificacao de risco invalida") || text.includes("revise a triagem")) {
+    return "Classificação de risco inválida. Revise a triagem antes de salvar.";
   }
   return fallback;
 }
@@ -834,6 +887,42 @@ async function createAtendimentoRealFromLocal(pacienteReal, pacienteLocal) {
     .select("id, paciente_id, status_id, queixa_principal, etapa_atual, hora_chegada_ts")
     .single();
   if (error) throw error;
+  return data;
+}
+
+// Fase 2 (Passo 4) - atualiza o episodio real ao concluir a triagem.
+// Somente UPDATE (nunca insert aqui). Atualiza so' status_id (->
+// aguardando_consulta), classificacao_risco_id (-> classificacao real do
+// dominio) e etapa_atual - nunca toca hora_chegada_ts/hora_desfecho_ts/
+// paciente_id nem nenhum outro campo clinico (consulta/observacao/
+// estabilizacao/transferencia/exames/prescricao ficam fora desta fase).
+// classificacaoIdResolvido e' opcional - se o chamador ja validou/resolveu
+// a classificacao antes (recomendado, para nao deixar paciente/atendimento
+// reais orfaos caso a classificacao seja invalida), passa o id aqui e a
+// funcao nao busca de novo. Se omitido, resolve a partir de
+// pacienteLocal.classificacao (compatibilidade com chamada direta).
+async function updateAtendimentoRealTriagem(atendimentoSupabaseId, pacienteLocal, classificacaoIdResolvido) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível salvar a triagem no servidor.");
+  }
+  if (!atendimentoSupabaseId) {
+    throw new Error("Atendimento sem cadastro real vinculado. Não foi possível salvar a triagem no servidor.");
+  }
+  const statusId = await getStatusAtendimentoIdByCodigo("aguardando_consulta");
+  const classificacaoId = classificacaoIdResolvido || await getClassificacaoRiscoIdByCodigo(normalizeText(pacienteLocal?.classificacao || ""));
+  const { data, error } = await window.GsiAuth.client
+    .from("atendimentos")
+    .update({
+      status_id: statusId,
+      classificacao_risco_id: classificacaoId,
+      etapa_atual: "Aguardando consulta"
+    })
+    .eq("id", atendimentoSupabaseId)
+    .select("id, paciente_id, status_id, classificacao_risco_id, desfecho_id, queixa_principal, etapa_atual, hora_chegada_ts, hora_desfecho_ts")
+    .single();
+  if (error) throw error;
+  atendimentosReaisState.porId[data.id] = data;
+  atendimentosReaisState.porPacienteId[data.paciente_id] = data;
   return data;
 }
 
@@ -4271,6 +4360,7 @@ function handleAction(action, button) {
   if (action === "save-triage") {
     const form = byId("triageForm");
     if (!requireForm(form)) return;
+    if (button.disabled) return;
     const values = formValues(form);
     const sinaisVitais = { pa: values.pa, fc: values.fc, fr: values.fr, sat: values.sat, temp: values.temp, glicemia: values.glicemia, dor: values.dor, obs: values.obs };
     const alertasClinicos = {
@@ -4306,17 +4396,63 @@ function handleAction(action, button) {
       classificacaoFinal: values.classificacao,
       justificativaClassificacao: values.justificativaClassificacao
     };
-    setPatientTimeIfMissing(id, "horaFimTriagem");
-    GsiApi.update("pacientes", id, { status: "Triagem concluída", queixa: values.queixa, classificacao: values.classificacao, sinaisVitais, triagemRisco });
-    const existing = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
-    if (existing) {
-      GsiApi.update("atendimentos", existing.id, { status: "Triagem concluída", motivo: values.motivo, local: values.local, periodo: values.periodo });
-    } else {
-      GsiApi.create("atendimentos", { pacienteId: id, chegada: nowTime(), profissional: "Enfermagem - Triagem", status: "Triagem concluída", espera: "00:00", motivo: values.motivo, local: values.local, periodo: values.periodo });
-    }
-    showToast("Triagem salva, classificação e atendimento atualizados.");
-    closeModal();
-    return renderPage("triagem");
+    const pacienteLocal = patientById(id);
+    if (!pacienteLocal) return;
+    const atendimentoLocalExistente = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
+    const textoOriginalBotao = button.textContent;
+    button.disabled = true;
+    button.textContent = "Salvando...";
+    (async () => {
+      try {
+        // Valida a classificacao ANTES de criar qualquer coisa real - se a
+        // classificacao for invalida/vazia, a operacao deve falhar aqui,
+        // sem deixar paciente/atendimento reais orfaos no banco (achado de
+        // teste: validar so' dentro de updateAtendimentoRealTriagem, no
+        // fim da cadeia, permitia que um erro de classificacao acontecesse
+        // DEPOIS de ja' ter promovido paciente/criado atendimento reais).
+        const classificacaoId = await getClassificacaoRiscoIdByCodigo(normalizeText(values.classificacao || ""));
+        // Fluxo ideal: atendimento real ja existe (via start-care). Fluxo
+        // alternativo: paciente e/ou atendimento ainda nao tem ponte - cria
+        // agora, com os dados atuais do formulario, em vez de bloquear.
+        let pacienteReal = pacienteLocal.pacienteSupabaseId
+          ? (pacientesReaisState.porId[pacienteLocal.pacienteSupabaseId] || { id: pacienteLocal.pacienteSupabaseId })
+          : null;
+        if (!pacienteReal) {
+          pacienteReal = await createPacienteRealFromLocal(pacienteLocal);
+          pacientesReaisState.porId[pacienteReal.id] = pacienteReal;
+        }
+        let atendimentoSupabaseId = atendimentoLocalExistente?.atendimentoSupabaseId;
+        if (!atendimentoSupabaseId) {
+          const atendimentoReal = await createAtendimentoRealFromLocal(pacienteReal, { ...pacienteLocal, queixa: values.queixa || pacienteLocal.queixa });
+          atendimentoSupabaseId = atendimentoReal.id;
+          atendimentosReaisState.porId[atendimentoReal.id] = atendimentoReal;
+          atendimentosReaisState.porPacienteId[atendimentoReal.paciente_id] = atendimentoReal;
+        }
+        await updateAtendimentoRealTriagem(atendimentoSupabaseId, { ...pacienteLocal, classificacao: values.classificacao }, classificacaoId);
+
+        // Real OK - so' agora grava local, com as pontes. Nao ha fallback
+        // local silencioso: se qualquer chamada acima falhar, o catch
+        // abaixo impede que estas linhas executem.
+        setPatientTimeIfMissing(id, "horaFimTriagem");
+        const patchPaciente = { status: "Triagem concluída", queixa: values.queixa, classificacao: values.classificacao, sinaisVitais, triagemRisco };
+        if (!pacienteLocal.pacienteSupabaseId) patchPaciente.pacienteSupabaseId = pacienteReal.id;
+        GsiApi.update("pacientes", id, patchPaciente);
+        if (atendimentoLocalExistente) {
+          GsiApi.update("atendimentos", atendimentoLocalExistente.id, { status: "Triagem concluída", motivo: values.motivo, local: values.local, periodo: values.periodo, atendimentoSupabaseId });
+        } else {
+          GsiApi.create("atendimentos", { pacienteId: id, chegada: nowTime(), profissional: "Enfermagem - Triagem", status: "Triagem concluída", espera: "00:00", motivo: values.motivo, local: values.local, periodo: values.periodo, atendimentoSupabaseId });
+        }
+        showToast("Triagem salva, classificação e atendimento atualizados.");
+        closeModal();
+        renderPage("triagem");
+      } catch (err) {
+        console.error("GSI Atendimentos reais: erro ao salvar triagem real", err);
+        button.disabled = false;
+        button.textContent = textoOriginalBotao;
+        showToast(friendlySupabaseError(err, "Não foi possível salvar a triagem no servidor. Tente novamente."), "warn");
+      }
+    })();
+    return;
   }
   if (action === "open-exam-request") return openExamModal(id || "p1", button.dataset.origem || "Consulta Médica");
   if (action === "open-prescription") return openPrescriptionModal(id || "p1");
