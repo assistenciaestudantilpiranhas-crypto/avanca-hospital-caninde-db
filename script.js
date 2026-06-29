@@ -614,6 +614,53 @@ function atendimentoRealById(id) {
   return atendimentosReaisState.porId[id] || null;
 }
 
+// Fase 2 (Passo 2) - cache de dom_status_atendimento (id real por codigo).
+// Nunca hardcodeia UUID fixo (muda entre ambientes/seeds) - busca uma unica
+// vez e cacheia em memoria, mesmo padrao de pacientesReaisState/
+// atendimentosReaisState. getStatusAtendimentoIdByCodigo() carrega sob
+// demanda (lazy) na primeira chamada, sem exigir um disparo separado em
+// renderPage.
+let statusAtendimentoState = { loaded: false, loading: false, error: null, porCodigo: {} };
+
+async function loadStatusAtendimentoDomain() {
+  if (statusAtendimentoState.loading || statusAtendimentoState.loaded) return;
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    statusAtendimentoState.error = "Sessão não carregada. Não foi possível carregar os status de atendimento.";
+    return;
+  }
+  statusAtendimentoState.loading = true;
+  statusAtendimentoState.error = null;
+  try {
+    const { data, error } = await window.GsiAuth.client
+      .from("dom_status_atendimento")
+      .select("id, codigo");
+    if (error) throw error;
+    const porCodigo = {};
+    (data || []).forEach((row) => { porCodigo[row.codigo] = row.id; });
+    statusAtendimentoState.porCodigo = porCodigo;
+    statusAtendimentoState.loaded = true;
+  } catch (err) {
+    console.error("GSI Atendimentos reais: erro ao carregar dom_status_atendimento", err);
+    statusAtendimentoState.error = "Não foi possível carregar os status de atendimento do servidor.";
+  } finally {
+    statusAtendimentoState.loading = false;
+  }
+}
+
+// Lanca erro amigavel (controlado) se o codigo nao existir no dominio real -
+// nunca retorna null/undefined silenciosamente, para nao deixar um INSERT
+// em atendimentos prosseguir com status_id invalido.
+async function getStatusAtendimentoIdByCodigo(codigo) {
+  if (!statusAtendimentoState.loaded) {
+    await loadStatusAtendimentoDomain();
+  }
+  const id = statusAtendimentoState.porCodigo[codigo];
+  if (!id) {
+    throw new Error(`Status de atendimento "${codigo}" não encontrado no servidor.`);
+  }
+  return id;
+}
+
 // Mesma lista local de sempre (GsiApi.list("atendimentos")) - hoje nenhum
 // atendimento local tem "atendimentoSupabaseId" (essa ponte ainda nao e
 // criada por nenhuma action nesta fase), entao esta funcao e' hoje um
@@ -753,6 +800,38 @@ async function createPacienteRealFromLocal(payload) {
       perfil_residencia: payload.perfil || null
     })
     .select("id, nome, data_nascimento, cpf, cartao_sus, telefone, municipio, perfil_residencia")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Fase 2 (Passo 2) - cria o episodio real em public.atendimentos. Somente
+// INSERT (nunca update aqui - mudanca de status_id/desfecho_id e' do
+// Passo 3, fora deste escopo). Campos minimos exigidos pela tabela
+// (paciente_id, status_id, queixa_principal, etapa_atual, hora_chegada_ts
+// sao NOT NULL) - setor_atual fica de fora de proposito: nao ha origem
+// segura/confiavel para esse dado no momento de start-care ainda.
+async function createAtendimentoRealFromLocal(pacienteReal, pacienteLocal) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível abrir o atendimento no servidor.");
+  }
+  if (!pacienteReal || !pacienteReal.id) {
+    throw new Error("Paciente sem cadastro real vinculado. Não foi possível abrir o atendimento no servidor.");
+  }
+  const statusId = await getStatusAtendimentoIdByCodigo("aguardando_triagem");
+  const horaChegadaTs = Number.isFinite(pacienteLocal?.horaChegadaTs)
+    ? new Date(pacienteLocal.horaChegadaTs).toISOString()
+    : new Date().toISOString();
+  const { data, error } = await window.GsiAuth.client
+    .from("atendimentos")
+    .insert({
+      paciente_id: pacienteReal.id,
+      status_id: statusId,
+      queixa_principal: pacienteLocal?.queixa || "Não informado",
+      etapa_atual: "Aguardando triagem",
+      hora_chegada_ts: horaChegadaTs
+    })
+    .select("id, paciente_id, status_id, queixa_principal, etapa_atual, hora_chegada_ts")
     .single();
   if (error) throw error;
   return data;
@@ -4090,10 +4169,59 @@ function handleAction(action, button) {
   if (action === "open-register-patient") return openRegisterPatient();
   if (action === "close-modal") return closeModal();
   if (action === "start-care") {
-    GsiApi.update("pacientes", id, { status: "Em atendimento" });
-    GsiApi.create("atendimentos", { pacienteId: id, chegada: nowTime(), profissional: "Equipe de plantão", status: "Em atendimento", espera: "00:00" });
-    showToast("Atendimento iniciado com sucesso.");
-    return renderPage(currentPage);
+    const pacienteLocal = patientById(id);
+    if (!pacienteLocal) return;
+    // Mesmo padrao de busca de save-triage/save-start-consult: um unico
+    // atendimento local "ativo" por paciente neste modelo de protótipo.
+    const atendimentoLocalExistente = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
+    if (atendimentoLocalExistente && atendimentoLocalExistente.atendimentoSupabaseId) {
+      // Episodio real ja existe para este paciente - idempotente, nao cria
+      // de novo (evita duplicar atendimento real em duplo clique/repeticao
+      // da action).
+      GsiApi.update("pacientes", id, { status: "Em atendimento" });
+      showToast("Atendimento iniciado com sucesso.");
+      return renderPage(currentPage);
+    }
+    if (button.disabled) return;
+    const textoOriginalBotao = button.textContent;
+    button.disabled = true;
+    button.textContent = "Abrindo...";
+    (async () => {
+      try {
+        let pacienteReal = pacienteLocal.pacienteSupabaseId
+          ? (pacientesReaisState.porId[pacienteLocal.pacienteSupabaseId] || { id: pacienteLocal.pacienteSupabaseId })
+          : null;
+        if (!pacienteReal) {
+          // Estrategia de promocao (igual a edicao de cadastro na Fase 1):
+          // paciente local sem ponte ainda - cria o cadastro real agora,
+          // com os dados atuais, antes de abrir o atendimento.
+          pacienteReal = await createPacienteRealFromLocal(pacienteLocal);
+          pacientesReaisState.porId[pacienteReal.id] = pacienteReal;
+        }
+        const atendimentoReal = await createAtendimentoRealFromLocal(pacienteReal, pacienteLocal);
+        atendimentosReaisState.porId[atendimentoReal.id] = atendimentoReal;
+        atendimentosReaisState.porPacienteId[atendimentoReal.paciente_id] = atendimentoReal;
+        // Real criado com sucesso - so' agora atualiza/cria o local, com as
+        // pontes. Nao ha fallback local silencioso: se qualquer chamada
+        // acima falhar, o catch abaixo impede que estas linhas executem.
+        const patchPaciente = { status: "Em atendimento" };
+        if (!pacienteLocal.pacienteSupabaseId) patchPaciente.pacienteSupabaseId = pacienteReal.id;
+        GsiApi.update("pacientes", id, patchPaciente);
+        if (atendimentoLocalExistente) {
+          GsiApi.update("atendimentos", atendimentoLocalExistente.id, { status: "Em atendimento", atendimentoSupabaseId: atendimentoReal.id });
+        } else {
+          GsiApi.create("atendimentos", { pacienteId: id, chegada: nowTime(), profissional: "Equipe de plantão", status: "Em atendimento", espera: "00:00", atendimentoSupabaseId: atendimentoReal.id });
+        }
+        showToast("Atendimento iniciado com sucesso.");
+        renderPage(currentPage);
+      } catch (err) {
+        console.error("GSI Atendimentos reais: erro ao abrir atendimento real", err);
+        button.disabled = false;
+        button.textContent = textoOriginalBotao;
+        showToast(friendlySupabaseError(err, "Não foi possível abrir o atendimento no servidor. Tente novamente."), "warn");
+      }
+    })();
+    return;
   }
   if (action === "classify-risk") {
     showToast("A classificação final deve ser registrada na Triagem.", "warn");
