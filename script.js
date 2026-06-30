@@ -986,7 +986,7 @@ async function updateAtendimentoRealTriagem(atendimentoSupabaseId, pacienteLocal
 // Em caso de falha no passo 2, a consulta ficara gravada sem desfecho em atendimentos
 // (risco documentado, sem RPC disponivel neste passo). O chamador (save-conduct)
 // controla a exibicao de erro e nao altera o estado local em nenhuma falha.
-// desfechoCodigo: "alta" | "medicacao_alta"  (ver dom_desfechos)
+// desfechoCodigo: "alta" | "medicacao_alta" | "evasao_desistencia" | "obito"  (ver dom_desfechos)
 // etapaFinal: texto da etapa para atendimentos.etapa_atual
 async function registrarCondutaRealAlta(atendimentoSupabaseId, condutaPayload, desfechoCodigo, etapaFinal) {
   if (!window.GsiAuth || !window.GsiAuth.client) {
@@ -4757,23 +4757,97 @@ function handleAction(action, button) {
       return;
     }
 
+    // Evasão/desistência — persistência real-first (Passo 5B.2)
+    if (values.destino === "Evasão/desistência") {
+      const pacienteLocal = patientById(id);
+      if (!pacienteLocal) return;
+      const atendimentoLocal = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
+      const atendimentoSupabaseId = atendimentoLocal?.atendimentoSupabaseId;
+      if (!atendimentoSupabaseId) {
+        showToast("Atendimento real não encontrado. Inicie o atendimento antes de registrar a conduta.", "warn");
+        return;
+      }
+      button.disabled = true;
+      const textoOriginalBotaoEvasao = button.textContent;
+      button.textContent = "Salvando...";
+      (async () => {
+        try {
+          await registrarCondutaRealAlta(
+            atendimentoSupabaseId,
+            { conduta: values.conduta, hipotese: values.hipotese, destino: values.destino, obs: values.obs },
+            "evasao_desistencia",
+            "Evasão/desistência"
+          );
+          setPatientTimeIfMissing(id, "horaConduta");
+          setPatientTimeIfMissing(id, "horaDesfecho");
+          GsiApi.update("pacientes", id, {
+            conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs },
+            status: "Evasão/desistência",
+            desfecho: "Evasão/desistência"
+          });
+          if (atendimentoLocal) {
+            GsiApi.update("atendimentos", atendimentoLocal.id, { status: "Evasão/desistência", desfecho: "Evasão/desistência" });
+          }
+          showToast("Evasão/desistência registrada.", "warn");
+          closeModal();
+          return renderPage("consulta");
+        } catch (err) {
+          console.error("GSI Atendimentos reais: erro ao registrar evasão/desistência", err);
+          button.disabled = false;
+          button.textContent = textoOriginalBotaoEvasao;
+          showToast(friendlySupabaseError(err, "Não foi possível registrar a evasão no servidor. Tente novamente."), "warn");
+        }
+      })();
+      return;
+    }
+
+    // Óbito — persistência real-first (Passo 5B.2)
+    if (values.destino === "Óbito") {
+      const pacienteLocal = patientById(id);
+      if (!pacienteLocal) return;
+      const atendimentoLocal = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
+      const atendimentoSupabaseId = atendimentoLocal?.atendimentoSupabaseId;
+      if (!atendimentoSupabaseId) {
+        showToast("Atendimento real não encontrado. Inicie o atendimento antes de registrar a conduta.", "warn");
+        return;
+      }
+      button.disabled = true;
+      const textoOriginalBotaoObito = button.textContent;
+      button.textContent = "Salvando...";
+      (async () => {
+        try {
+          await registrarCondutaRealAlta(
+            atendimentoSupabaseId,
+            { conduta: values.conduta, hipotese: values.hipotese, destino: values.destino, obs: values.obs },
+            "obito",
+            "Óbito"
+          );
+          setPatientTimeIfMissing(id, "horaConduta");
+          setPatientTimeIfMissing(id, "horaDesfecho");
+          GsiApi.update("pacientes", id, {
+            conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs },
+            status: "Óbito",
+            desfecho: "Óbito"
+          });
+          if (atendimentoLocal) {
+            GsiApi.update("atendimentos", atendimentoLocal.id, { status: "Óbito", desfecho: "Óbito" });
+          }
+          showToast("Óbito registrado.", "warn");
+          closeModal();
+          return renderPage("consulta");
+        } catch (err) {
+          console.error("GSI Atendimentos reais: erro ao registrar óbito", err);
+          button.disabled = false;
+          button.textContent = textoOriginalBotaoObito;
+          showToast(friendlySupabaseError(err, "Não foi possível registrar o óbito no servidor. Tente novamente."), "warn");
+        }
+      })();
+      return;
+    }
+
     // Destinos locais (sem persistência real neste passo)
     setPatientTimeIfMissing(id, "horaConduta");
     GsiApi.update("pacientes", id, { conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs } });
-    if (values.destino === "Evasão/desistência") {
-      setPatientTimeIfMissing(id, "horaDesfecho");
-      GsiApi.update("pacientes", id, { status: "Evasão/desistência", desfecho: "Evasão/desistência" });
-      showToast("Evasão/desistência registrada.", "warn");
-      closeModal();
-      return renderPage("consulta");
-    }
-    if (values.destino === "Óbito") {
-      setPatientTimeIfMissing(id, "horaDesfecho");
-      GsiApi.update("pacientes", id, { status: "Óbito", desfecho: "Óbito" });
-      showToast("Óbito registrado.", "warn");
-      closeModal();
-      return renderPage("consulta");
-    }
     if (values.destino === "Observação Clínica") {
       GsiApi.update("pacientes", id, { status: "Em observação clínica", desfecho: "Observação Clínica", observacaoClinica: { origem: "Consulta Médica", inicio: nowTime(), inicioTimestamp: Date.now(), reavaliacoes: [] } });
       showToast("Paciente encaminhado para Observação Clínica.");
