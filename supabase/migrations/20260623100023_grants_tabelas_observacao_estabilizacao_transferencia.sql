@@ -1,0 +1,43 @@
+-- Migration: GRANT de tabela para "authenticated" nas tabelas operacionais
+-- complementares (observacoes, estabilizacoes, transferencias).
+--
+-- Contexto: a migration 20260623100022 cobriu explicitamente consultas,
+-- pacientes, atendimentos, triagens e chamadas. As tres tabelas abaixo
+-- tambem sao acessadas via PostgREST pelo perfil Medico/Enfermagem no
+-- fluxo assistencial, mas nao receberam GRANT explicito naquela migration.
+-- No ambiente local (supabase start) o owner do banco bypassa esse requisito,
+-- por isso os testes REST passaram; em Supabase Cloud o PostgREST aplica
+-- o modelo de privilegios padrao do Postgres e devolve
+-- "permission denied for table X" (42501) antes de avaliar qualquer policy
+-- de RLS -- o mesmo erro diagnosticado antes da migration 20260623100022.
+-- Esta migration corrige o gap de forma cirurgica, sem alterar RLS, policies,
+-- triggers, dominios, dados ou ownership.
+--
+-- O que esta migration FAZ:
+--   - Concede SELECT, INSERT, UPDATE, DELETE ao role "authenticated" nas tres
+--     tabelas. O escopo de operacao de cada usuario continua controlado pelas
+--     policies de RLS ja existentes (nenhuma policy e criada ou removida aqui).
+--
+-- O que esta migration NAO faz:
+--   - Nao usa GRANT ALL (escopo minimo intencional).
+--   - Nao concede nada ao role "anon" (acesso anonimo nao foi previsto para
+--     dados assistenciais neste projeto).
+--   - Nao desabilita RLS em nenhuma tabela.
+--   - Nao cria, altera ou remove nenhuma policy.
+--   - Nao altera triggers, dominios, sequences ou ownership.
+--   - Nao insere, atualiza ou remove dados.
+--
+-- Tabelas e justificativa:
+--   observacoes    -- registro de observacao clinica/pediatrica/obstetrica;
+--                     INSERT por Medico/Enfermagem (policy observacoes_insert_*);
+--                     UPDATE por Medico/Enfermagem (policy observacoes_update_*).
+--   estabilizacoes -- registro de passagem pela sala de estabilizacao (sala
+--                     vermelha); INSERT/UPDATE por Medico/Enfermagem.
+--   transferencias -- solicitacao de transferencia regulada; INSERT por Medico
+--                     (policy transferencias_insert_medico_regulacao_admin);
+--                     UPDATE restrito a Regulacao/admin (policy
+--                     transferencias_update_regulacao_admin).
+
+grant select, insert, update, delete on table public.observacoes     to authenticated;
+grant select, insert, update, delete on table public.estabilizacoes  to authenticated;
+grant select, insert, update, delete on table public.transferencias   to authenticated;
