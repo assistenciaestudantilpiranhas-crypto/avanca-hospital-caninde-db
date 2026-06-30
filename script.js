@@ -926,6 +926,33 @@ async function updateAtendimentoRealTriagem(atendimentoSupabaseId, pacienteLocal
   return data;
 }
 
+// Passo 5A (Fase 2) - persiste inicio da consulta medica em public.atendimentos.
+// Atualiza somente status_id (em_consulta) e etapa_atual. Nunca toca
+// paciente_id, classificacao_risco_id, desfecho_id, hora_chegada_ts,
+// hora_desfecho_ts, setor_atual ou profissional_responsavel_id.
+async function updateAtendimentoRealConsultaInicio(atendimentoSupabaseId) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível registrar o início da consulta no servidor.");
+  }
+  if (!atendimentoSupabaseId) {
+    throw new Error("Atendimento sem cadastro real vinculado. Não foi possível registrar o início da consulta no servidor.");
+  }
+  const statusId = await getStatusAtendimentoIdByCodigo("em_consulta");
+  const { data, error } = await window.GsiAuth.client
+    .from("atendimentos")
+    .update({
+      status_id: statusId,
+      etapa_atual: "Em consulta"
+    })
+    .eq("id", atendimentoSupabaseId)
+    .select("id, paciente_id, status_id, classificacao_risco_id, desfecho_id, queixa_principal, etapa_atual, hora_chegada_ts, hora_desfecho_ts")
+    .single();
+  if (error) throw error;
+  atendimentosReaisState.porId[data.id] = data;
+  atendimentosReaisState.porPacienteId[data.paciente_id] = data;
+  return data;
+}
+
 // Passo 3 (Fase 1) - atualiza APENAS o cadastro estavel em public.pacientes
 // (mesmos 7 campos de createPacienteRealFromLocal), nunca status/fluxo.
 // pacienteLocal e' o objeto local completo (precisa de pacienteSupabaseId,
@@ -4483,22 +4510,43 @@ function handleAction(action, button) {
     const form = byId("startConsultForm");
     if (!requireForm(form)) return;
     const values = formValues(form);
-    const patient = patientById(id) || {};
-    const atendimentoAtual = GsiApi.list("atendimentos").find((a) => a.pacienteId === id) || {};
-    const profissional = (values.medico === "Outro profissional médico" ? (values.medicoOutro || "").trim() : values.medico) || "Equipe médica";
-    const salaAtendimento = (values.sala || "").trim() || getPatientConsultRoom(patient, atendimentoAtual);
-    const patientWithConsultTime = setPatientTimeIfMissing(id, "horaInicioConsulta") || patientById(id);
-    GsiApi.update("pacientes", id, { status: "Em consulta", profissionalResponsavel: profissional, consultorioAtual: salaAtendimento, salaAtendimento });
-    const patch = { status: "Em consulta", profissional, inicioConsulta: patientWithConsultTime?.horaInicioConsulta || nowTime(), crm: values.crm, salaAtendimento, observacaoInicial: values.obsInicial };
-    const existing = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
-    if (existing) {
-      GsiApi.update("atendimentos", existing.id, patch);
-    } else {
-      GsiApi.create("atendimentos", { pacienteId: id, chegada: nowTime(), espera: "00:00", ...patch });
+    const pacienteLocal = patientById(id);
+    if (!pacienteLocal) return;
+    const atendimentoLocalExistente = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
+    const atendimentoSupabaseId = atendimentoLocalExistente?.atendimentoSupabaseId;
+    if (!atendimentoSupabaseId) {
+      showToast("Atendimento real não encontrado. Inicie o atendimento antes de iniciar a consulta.", "warn");
+      return;
     }
-    showToast("Consulta iniciada com " + profissional + ".");
-    closeModal();
-    return renderPage("consulta");
+    const profissional = (values.medico === "Outro profissional médico" ? (values.medicoOutro || "").trim() : values.medico) || "Equipe médica";
+    const salaAtendimento = (values.sala || "").trim() || getPatientConsultRoom(pacienteLocal, atendimentoLocalExistente || {});
+    button.disabled = true;
+    const textoOriginalBotao = button.textContent;
+    button.textContent = "Salvando...";
+    (async () => {
+      try {
+        await updateAtendimentoRealConsultaInicio(atendimentoSupabaseId);
+        // Real OK - so' agora grava local. Nao ha fallback local silencioso:
+        // se o UPDATE real falhar, o catch abaixo impede que estas linhas executem.
+        const patientWithConsultTime = setPatientTimeIfMissing(id, "horaInicioConsulta") || patientById(id);
+        GsiApi.update("pacientes", id, { status: "Em consulta", profissionalResponsavel: profissional, consultorioAtual: salaAtendimento, salaAtendimento });
+        const patch = { status: "Em consulta", profissional, inicioConsulta: patientWithConsultTime?.horaInicioConsulta || nowTime(), crm: values.crm, salaAtendimento, observacaoInicial: values.obsInicial };
+        if (atendimentoLocalExistente) {
+          GsiApi.update("atendimentos", atendimentoLocalExistente.id, patch);
+        } else {
+          GsiApi.create("atendimentos", { pacienteId: id, chegada: nowTime(), espera: "00:00", ...patch });
+        }
+        showToast("Consulta iniciada com " + profissional + ".");
+        closeModal();
+        return renderPage("consulta");
+      } catch (err) {
+        console.error("GSI Atendimentos reais: erro ao registrar início da consulta", err);
+        button.disabled = false;
+        button.textContent = textoOriginalBotao;
+        showToast(friendlySupabaseError(err, "Não foi possível registrar o início da consulta no servidor. Tente novamente."), "warn");
+      }
+    })();
+    return;
   }
   if (action === "open-conduct-modal") return openConductModal(id);
   if (action === "save-conduct") {
