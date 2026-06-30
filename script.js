@@ -978,6 +978,103 @@ async function updateAtendimentoRealTriagem(atendimentoSupabaseId, pacienteLocal
   return data;
 }
 
+// Passo 5B.1 (Fase 2) - registra conduta medica final de alta em public.consultas
+// e depois atualiza public.atendimentos com desfecho_id/status_id/hora_desfecho_ts.
+// Sequencia obrigatoria por causa do trigger fn_validate_atendimento_transicao:
+//   1. upsert em consultas (busca por atendimento_id, atualiza se existe, insere se nao);
+//   2. update em atendimentos (status, desfecho, etapa, hora_desfecho_ts).
+// Em caso de falha no passo 2, a consulta ficara gravada sem desfecho em atendimentos
+// (risco documentado, sem RPC disponivel neste passo). O chamador (save-conduct)
+// controla a exibicao de erro e nao altera o estado local em nenhuma falha.
+// desfechoCodigo: "alta" | "medicacao_alta"  (ver dom_desfechos)
+// etapaFinal: texto da etapa para atendimentos.etapa_atual
+async function registrarCondutaRealAlta(atendimentoSupabaseId, condutaPayload, desfechoCodigo, etapaFinal) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível registrar a conduta no servidor.");
+  }
+  if (!atendimentoSupabaseId) {
+    throw new Error("Atendimento real não encontrado. Inicie o atendimento antes de registrar a conduta.");
+  }
+
+  const [statusId, desfechoId] = await Promise.all([
+    getStatusAtendimentoIdByCodigo("desfecho_registrado"),
+    getDesfechoIdByCodigo(desfechoCodigo)
+  ]);
+
+  const agora = new Date().toISOString();
+  const client = window.GsiAuth.client;
+
+  // Buscar consulta existente para este atendimento (sem UNIQUE constraint,
+  // pega o registro mais recente se houver mais de um)
+  const { data: consultasExistentes, error: errBusca } = await client
+    .from("consultas")
+    .select("id")
+    .eq("atendimento_id", atendimentoSupabaseId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (errBusca) throw errBusca;
+
+  const consultaExistente = consultasExistentes?.[0];
+  let consultaData;
+
+  if (consultaExistente) {
+    // UPDATE consulta existente com a conduta final
+    const { data, error } = await client
+      .from("consultas")
+      .update({
+        conduta: condutaPayload.conduta,
+        hipotese_diagnostica: condutaPayload.hipotese || null,
+        desfecho_proposto: condutaPayload.destino,
+        observacoes: condutaPayload.obs || null,
+        hora_fim_ts: agora
+      })
+      .eq("id", consultaExistente.id)
+      .select("id, atendimento_id, conduta, desfecho_proposto, hora_fim_ts")
+      .single();
+    if (error) throw error;
+    consultaData = data;
+  } else {
+    // INSERT nova consulta (hora_inicio_ts NOT NULL - usa agora como fallback)
+    const { data, error } = await client
+      .from("consultas")
+      .insert({
+        atendimento_id: atendimentoSupabaseId,
+        hora_inicio_ts: agora,
+        hora_fim_ts: agora,
+        conduta: condutaPayload.conduta,
+        hipotese_diagnostica: condutaPayload.hipotese || null,
+        desfecho_proposto: condutaPayload.destino,
+        observacoes: condutaPayload.obs || null
+      })
+      .select("id, atendimento_id, conduta, desfecho_proposto, hora_fim_ts")
+      .single();
+    if (error) throw error;
+    consultaData = data;
+  }
+
+  // UPDATE atendimentos (somente depois de consulta confirmada)
+  const { data: atendData, error: errAtend } = await client
+    .from("atendimentos")
+    .update({
+      status_id: statusId,
+      desfecho_id: desfechoId,
+      etapa_atual: etapaFinal,
+      hora_desfecho_ts: agora
+    })
+    .eq("id", atendimentoSupabaseId)
+    .select("id, paciente_id, status_id, classificacao_risco_id, desfecho_id, queixa_principal, etapa_atual, hora_chegada_ts, hora_desfecho_ts")
+    .single();
+  if (errAtend) {
+    // Consulta ja foi gravada - documenta o risco no console antes de propagar
+    console.error("GSI Atendimentos reais: consulta gravada mas falha ao atualizar desfecho em atendimentos. Consulta id:", consultaData?.id, errAtend);
+    throw errAtend;
+  }
+
+  atendimentosReaisState.porId[atendData.id] = atendData;
+  atendimentosReaisState.porPacienteId[atendData.paciente_id] = atendData;
+  return { consulta: consultaData, atendimento: atendData };
+}
+
 // Passo 5A (Fase 2) - persiste inicio da consulta medica em public.atendimentos.
 // Atualiza somente status_id (em_consulta) e etapa_atual. Nunca toca
 // paciente_id, classificacao_risco_id, desfecho_id, hora_chegada_ts,
@@ -4605,22 +4702,64 @@ function handleAction(action, button) {
     const form = byId("conductForm");
     if (!requireForm(form)) return;
     const values = formValues(form);
+
+    // Destinos de alta — persistência real-first antes de qualquer alteração local.
+    // Outros destinos (evasão, óbito, observação, estabilização, transferência,
+    // exames, prescrição) continuam 100% locais neste passo.
+    if (values.destino === "Dar alta" || values.destino === "Alta após consulta" || values.destino === "Medicação e alta") {
+      const pacienteLocal = patientById(id);
+      if (!pacienteLocal) return;
+      const atendimentoLocal = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
+      const atendimentoSupabaseId = atendimentoLocal?.atendimentoSupabaseId;
+      if (!atendimentoSupabaseId) {
+        showToast("Atendimento real não encontrado. Inicie o atendimento antes de registrar a conduta.", "warn");
+        return;
+      }
+      const isAltaMedicacao = values.destino === "Medicação e alta";
+      const desfechoCodigo = isAltaMedicacao ? "medicacao_alta" : "alta";
+      const etapaFinal = isAltaMedicacao ? "Alta — Medicação e alta" : "Alta";
+      const desfechoLocal = isAltaMedicacao ? "Medicação e alta" : "Alta após consulta";
+      const toastMsg = isAltaMedicacao
+        ? "Conduta registrada e alta concedida após medicação."
+        : "Conduta registrada e alta concedida.";
+      button.disabled = true;
+      const textoOriginalBotao = button.textContent;
+      button.textContent = "Salvando...";
+      (async () => {
+        try {
+          await registrarCondutaRealAlta(
+            atendimentoSupabaseId,
+            { conduta: values.conduta, hipotese: values.hipotese, destino: values.destino, obs: values.obs },
+            desfechoCodigo,
+            etapaFinal
+          );
+          // Apenas após confirmação real: atualizar local
+          setPatientTimeIfMissing(id, "horaConduta");
+          setPatientTimeIfMissing(id, "horaDesfecho");
+          GsiApi.update("pacientes", id, {
+            conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs },
+            status: "Alta",
+            desfecho: desfechoLocal
+          });
+          if (atendimentoLocal) {
+            GsiApi.update("atendimentos", atendimentoLocal.id, { status: "Alta", desfecho: desfechoLocal });
+          }
+          showToast(toastMsg);
+          closeModal();
+          return renderPage("consulta");
+        } catch (err) {
+          console.error("GSI Atendimentos reais: erro ao registrar conduta/alta", err);
+          button.disabled = false;
+          button.textContent = textoOriginalBotao;
+          showToast(friendlySupabaseError(err, "Não foi possível registrar a conduta no servidor. Tente novamente."), "warn");
+        }
+      })();
+      return;
+    }
+
+    // Destinos locais (sem persistência real neste passo)
     setPatientTimeIfMissing(id, "horaConduta");
     GsiApi.update("pacientes", id, { conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs } });
-    if (values.destino === "Dar alta" || values.destino === "Alta após consulta") {
-      setPatientTimeIfMissing(id, "horaDesfecho");
-      GsiApi.update("pacientes", id, { status: "Alta", desfecho: "Alta após consulta" });
-      showToast("Conduta registrada e alta concedida.");
-      closeModal();
-      return renderPage("consulta");
-    }
-    if (values.destino === "Medicação e alta") {
-      setPatientTimeIfMissing(id, "horaDesfecho");
-      GsiApi.update("pacientes", id, { status: "Alta", desfecho: "Medicação e alta" });
-      showToast("Conduta registrada e alta concedida após medicação.");
-      closeModal();
-      return renderPage("consulta");
-    }
     if (values.destino === "Evasão/desistência") {
       setPatientTimeIfMissing(id, "horaDesfecho");
       GsiApi.update("pacientes", id, { status: "Evasão/desistência", desfecho: "Evasão/desistência" });
