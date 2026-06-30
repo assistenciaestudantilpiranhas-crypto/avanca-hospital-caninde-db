@@ -711,6 +711,58 @@ async function getClassificacaoRiscoIdByCodigo(codigo) {
   return id;
 }
 
+// Fase 2 (Passo 5B.5) - cache de dom_desfechos (id real por codigo), mesmo
+// padrao lazy-load de statusAtendimentoState/classificacaoRiscoState.
+// Codigos reais: alta, alta_observacao, medicacao_alta, transferencia_regulada,
+// evasao_desistencia, obito (ver migration 20260623100007).
+// getDesfechoIdByCodigo() e' o ponto de entrada seguro - nunca retorna
+// null/undefined silenciosamente para nao deixar um INSERT/UPDATE em
+// atendimentos prosseguir com desfecho_id invalido.
+let desfechosState = { loaded: false, loading: false, error: null, porCodigo: {}, porId: {} };
+
+async function loadDesfechosDomain() {
+  if (desfechosState.loading || desfechosState.loaded) return;
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    desfechosState.error = "Sessão não carregada. Não foi possível carregar os desfechos do servidor.";
+    return;
+  }
+  desfechosState.loading = true;
+  desfechosState.error = null;
+  try {
+    const { data, error } = await window.GsiAuth.client
+      .from("dom_desfechos")
+      .select("id, codigo, descricao")
+      .order("ordem");
+    if (error) throw error;
+    const porCodigo = {};
+    const porId = {};
+    (data || []).forEach((row) => {
+      porCodigo[row.codigo] = row.id;
+      porId[row.id] = row;
+    });
+    desfechosState.porCodigo = porCodigo;
+    desfechosState.porId = porId;
+    desfechosState.loaded = true;
+  } catch (err) {
+    console.error("GSI Atendimentos reais: erro ao carregar dom_desfechos", err);
+    desfechosState.error = "Não foi possível carregar os desfechos do servidor.";
+    throw err;
+  } finally {
+    desfechosState.loading = false;
+  }
+}
+
+async function getDesfechoIdByCodigo(codigo) {
+  if (!desfechosState.loaded) {
+    await loadDesfechosDomain();
+  }
+  const id = desfechosState.porCodigo[codigo];
+  if (!id) {
+    throw new Error(`Desfecho não encontrado: ${codigo}`);
+  }
+  return id;
+}
+
 // Mesma lista local de sempre (GsiApi.list("atendimentos")) - hoje nenhum
 // atendimento local tem "atendimentoSupabaseId" (essa ponte ainda nao e
 // criada por nenhuma action nesta fase), entao esta funcao e' hoje um
