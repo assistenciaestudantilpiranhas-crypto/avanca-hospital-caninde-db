@@ -763,6 +763,52 @@ async function getDesfechoIdByCodigo(codigo) {
   return id;
 }
 
+// Passo 5B.3 (Fase 2) - cache de dom_tipos_observacao (id real por codigo),
+// mesmo padrao lazy-load de statusAtendimentoState/desfechosState.
+// Codigos reais: clinica, pediatrica, obstetrica (ver migration 20260623100001).
+// getTipoObservacaoIdByCodigo() e' o ponto de entrada seguro - nunca retorna
+// null/undefined silenciosamente para nao deixar um INSERT em observacoes
+// prosseguir com tipo_id invalido.
+let tiposObservacaoState = { loaded: false, loading: false, error: null, porCodigo: {} };
+
+async function loadTiposObservacaoDomain() {
+  if (tiposObservacaoState.loading || tiposObservacaoState.loaded) return;
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    tiposObservacaoState.error = "Sessão não carregada. Não foi possível carregar os tipos de observação.";
+    return;
+  }
+  tiposObservacaoState.loading = true;
+  tiposObservacaoState.error = null;
+  try {
+    const { data, error } = await window.GsiAuth.client
+      .from("dom_tipos_observacao")
+      .select("id, codigo")
+      .order("ordem");
+    if (error) throw error;
+    const porCodigo = {};
+    (data || []).forEach((row) => { porCodigo[row.codigo] = row.id; });
+    tiposObservacaoState.porCodigo = porCodigo;
+    tiposObservacaoState.loaded = true;
+  } catch (err) {
+    console.error("GSI Atendimentos reais: erro ao carregar dom_tipos_observacao", err);
+    tiposObservacaoState.error = "Não foi possível carregar os tipos de observação do servidor.";
+    throw err;
+  } finally {
+    tiposObservacaoState.loading = false;
+  }
+}
+
+async function getTipoObservacaoIdByCodigo(codigo) {
+  if (!tiposObservacaoState.loaded) {
+    await loadTiposObservacaoDomain();
+  }
+  const id = tiposObservacaoState.porCodigo[codigo];
+  if (!id) {
+    throw new Error(`Tipo de observação não encontrado: ${codigo}`);
+  }
+  return id;
+}
+
 // Mesma lista local de sempre (GsiApi.list("atendimentos")) - hoje nenhum
 // atendimento local tem "atendimentoSupabaseId" (essa ponte ainda nao e
 // criada por nenhuma action nesta fase), entao esta funcao e' hoje um
@@ -1073,6 +1119,121 @@ async function registrarCondutaRealAlta(atendimentoSupabaseId, condutaPayload, d
   atendimentosReaisState.porId[atendData.id] = atendData;
   atendimentosReaisState.porPacienteId[atendData.paciente_id] = atendData;
   return { consulta: consultaData, atendimento: atendData };
+}
+
+// Passo 5B.3 (Fase 2) - registra encaminhamento para Observacao Clinica,
+// Pediatrica ou Obstetrica em public.consultas + public.observacoes e depois
+// atualiza public.atendimentos (status_id, etapa_atual, setor_atual).
+// Observacao NAO e' desfecho final: desfecho_id e hora_desfecho_ts ficam null.
+// Sequencia obrigatoria (sem RPC/transacao disponivel neste passo):
+//   1. upsert em consultas (busca por atendimento_id, atualiza se existe);
+//   2. insert em observacoes com tipo_id resolvido via getTipoObservacaoIdByCodigo;
+//   3. update em atendimentos (status_id, etapa_atual, setor_atual).
+// Risco documentado: se o passo 2 ou 3 falhar apos o passo 1 ter gravado,
+// ficara uma consulta (e possivelmente uma observacao) orfas sem desfecho em
+// atendimentos. O chamador (save-conduct) controla o erro e nao altera o
+// estado local em nenhuma falha.
+// observacaoCodigo: "clinica" | "pediatrica" | "obstetrica" (ver dom_tipos_observacao)
+async function registrarCondutaRealObservacao(atendimentoSupabaseId, condutaPayload, observacaoCodigo, etapaAtual, setorAtual) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível registrar a conduta no servidor.");
+  }
+  if (!atendimentoSupabaseId) {
+    throw new Error("Atendimento real não encontrado. Inicie o atendimento antes de registrar a conduta.");
+  }
+
+  const [statusId, tipoObservacaoId] = await Promise.all([
+    getStatusAtendimentoIdByCodigo("em_observacao"),
+    getTipoObservacaoIdByCodigo(observacaoCodigo)
+  ]);
+
+  const agora = new Date().toISOString();
+  const client = window.GsiAuth.client;
+
+  // 1. Registrar/atualizar consulta com a conduta medica
+  const { data: consultasExistentes, error: errBusca } = await client
+    .from("consultas")
+    .select("id")
+    .eq("atendimento_id", atendimentoSupabaseId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (errBusca) throw errBusca;
+
+  const consultaExistente = consultasExistentes?.[0];
+  let consultaData;
+
+  if (consultaExistente) {
+    const { data, error } = await client
+      .from("consultas")
+      .update({
+        conduta: condutaPayload.conduta,
+        hipotese_diagnostica: condutaPayload.hipotese || null,
+        desfecho_proposto: condutaPayload.destino,
+        observacoes: condutaPayload.obs || null,
+        hora_fim_ts: agora
+      })
+      .eq("id", consultaExistente.id)
+      .select("id, atendimento_id, conduta, desfecho_proposto, hora_fim_ts")
+      .single();
+    if (error) throw error;
+    consultaData = data;
+  } else {
+    const { data, error } = await client
+      .from("consultas")
+      .insert({
+        atendimento_id: atendimentoSupabaseId,
+        hora_inicio_ts: agora,
+        hora_fim_ts: agora,
+        conduta: condutaPayload.conduta,
+        hipotese_diagnostica: condutaPayload.hipotese || null,
+        desfecho_proposto: condutaPayload.destino,
+        observacoes: condutaPayload.obs || null
+      })
+      .select("id, atendimento_id, conduta, desfecho_proposto, hora_fim_ts")
+      .single();
+    if (error) throw error;
+    consultaData = data;
+  }
+
+  // 2. Inserir registro em observacoes (somente apos consulta confirmada)
+  const { data: obsData, error: errObs } = await client
+    .from("observacoes")
+    .insert({
+      atendimento_id: atendimentoSupabaseId,
+      tipo_id: tipoObservacaoId,
+      origem: "Consulta médica",
+      inicio_ts: agora
+    })
+    .select("id, atendimento_id, tipo_id, origem, inicio_ts")
+    .single();
+  if (errObs) {
+    // Consulta ja gravada — documenta o risco antes de propagar
+    console.error("GSI Atendimentos reais: consulta gravada mas falha ao inserir em observacoes. Consulta id:", consultaData?.id, errObs);
+    throw errObs;
+  }
+
+  // 3. Atualizar atendimentos (somente apos observacao confirmada)
+  const updatePayload = {
+    status_id: statusId,
+    etapa_atual: etapaAtual
+  };
+  if (setorAtual) updatePayload.setor_atual = setorAtual;
+
+  const { data: atendData, error: errAtend } = await client
+    .from("atendimentos")
+    .update(updatePayload)
+    .eq("id", atendimentoSupabaseId)
+    .select("id, paciente_id, status_id, classificacao_risco_id, desfecho_id, queixa_principal, etapa_atual, hora_chegada_ts, hora_desfecho_ts")
+    .single();
+  if (errAtend) {
+    // Consulta e observacao ja gravadas — documenta o risco antes de propagar
+    console.error("GSI Atendimentos reais: consulta e observacao gravadas mas falha ao atualizar atendimento. Consulta id:", consultaData?.id, "Observacao id:", obsData?.id, errAtend);
+    throw errAtend;
+  }
+
+  atendimentosReaisState.porId[atendData.id] = atendData;
+  atendimentosReaisState.porPacienteId[atendData.paciente_id] = atendData;
+  return { consulta: consultaData, observacao: obsData, atendimento: atendData };
 }
 
 // Passo 5A (Fase 2) - persiste inicio da consulta medica em public.atendimentos.
@@ -4845,27 +5006,141 @@ function handleAction(action, button) {
       return;
     }
 
+    // Observação Clínica — persistência real-first (Passo 5B.3)
+    if (values.destino === "Observação Clínica") {
+      const pacienteLocalOC = patientById(id);
+      if (!pacienteLocalOC) return;
+      const atendimentoLocalOC = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
+      const atendimentoSupabaseIdOC = atendimentoLocalOC?.atendimentoSupabaseId;
+      if (!atendimentoSupabaseIdOC) {
+        showToast("Atendimento real não encontrado. Inicie o atendimento antes de registrar a conduta.", "warn");
+        return;
+      }
+      button.disabled = true;
+      const textoOriginalBotaoOC = button.textContent;
+      button.textContent = "Salvando...";
+      (async () => {
+        try {
+          await registrarCondutaRealObservacao(
+            atendimentoSupabaseIdOC,
+            { conduta: values.conduta, hipotese: values.hipotese, destino: values.destino, obs: values.obs },
+            "clinica",
+            "Em observação clínica",
+            "Observação Clínica"
+          );
+          setPatientTimeIfMissing(id, "horaConduta");
+          GsiApi.update("pacientes", id, {
+            conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs },
+            status: "Em observação clínica",
+            observacaoClinica: { origem: "Consulta médica", inicio: nowTime(), inicioTimestamp: Date.now(), reavaliacoes: [] }
+          });
+          if (atendimentoLocalOC) {
+            GsiApi.update("atendimentos", atendimentoLocalOC.id, { status: "Em observação clínica" });
+          }
+          showToast("Paciente encaminhado para Observação Clínica.");
+          closeModal();
+          return renderPage("consulta");
+        } catch (err) {
+          console.error("GSI Atendimentos reais: erro ao registrar encaminhamento para Observação Clínica", err);
+          button.disabled = false;
+          button.textContent = textoOriginalBotaoOC;
+          showToast(friendlySupabaseError(err, "Não foi possível registrar o encaminhamento no servidor. Tente novamente."), "warn");
+        }
+      })();
+      return;
+    }
+
+    // Observação Pediátrica — persistência real-first (Passo 5B.3)
+    if (values.destino === "Observação Pediátrica") {
+      const pacienteLocalOP = patientById(id);
+      if (!pacienteLocalOP) return;
+      const atendimentoLocalOP = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
+      const atendimentoSupabaseIdOP = atendimentoLocalOP?.atendimentoSupabaseId;
+      if (!atendimentoSupabaseIdOP) {
+        showToast("Atendimento real não encontrado. Inicie o atendimento antes de registrar a conduta.", "warn");
+        return;
+      }
+      button.disabled = true;
+      const textoOriginalBotaoOP = button.textContent;
+      button.textContent = "Salvando...";
+      (async () => {
+        try {
+          await registrarCondutaRealObservacao(
+            atendimentoSupabaseIdOP,
+            { conduta: values.conduta, hipotese: values.hipotese, destino: values.destino, obs: values.obs },
+            "pediatrica",
+            "Em observação pediátrica",
+            "Observação Pediátrica"
+          );
+          setPatientTimeIfMissing(id, "horaConduta");
+          GsiApi.update("pacientes", id, {
+            conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs },
+            status: "Em observação pediátrica",
+            observacaoPediatrica: { origem: "Consulta médica", inicio: nowTime(), inicioTimestamp: Date.now(), reavaliacoes: [] }
+          });
+          if (atendimentoLocalOP) {
+            GsiApi.update("atendimentos", atendimentoLocalOP.id, { status: "Em observação pediátrica" });
+          }
+          showToast("Paciente encaminhado para Observação Pediátrica.");
+          closeModal();
+          return renderPage("consulta");
+        } catch (err) {
+          console.error("GSI Atendimentos reais: erro ao registrar encaminhamento para Observação Pediátrica", err);
+          button.disabled = false;
+          button.textContent = textoOriginalBotaoOP;
+          showToast(friendlySupabaseError(err, "Não foi possível registrar o encaminhamento no servidor. Tente novamente."), "warn");
+        }
+      })();
+      return;
+    }
+
+    // Observação Obstétrica — persistência real-first (Passo 5B.3)
+    if (values.destino === "Observação Obstétrica") {
+      const pacienteLocalOB = patientById(id);
+      if (!pacienteLocalOB) return;
+      const atendimentoLocalOB = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
+      const atendimentoSupabaseIdOB = atendimentoLocalOB?.atendimentoSupabaseId;
+      if (!atendimentoSupabaseIdOB) {
+        showToast("Atendimento real não encontrado. Inicie o atendimento antes de registrar a conduta.", "warn");
+        return;
+      }
+      button.disabled = true;
+      const textoOriginalBotaoOB = button.textContent;
+      button.textContent = "Salvando...";
+      (async () => {
+        try {
+          await registrarCondutaRealObservacao(
+            atendimentoSupabaseIdOB,
+            { conduta: values.conduta, hipotese: values.hipotese, destino: values.destino, obs: values.obs },
+            "obstetrica",
+            "Em observação obstétrica",
+            "Observação Obstétrica"
+          );
+          setPatientTimeIfMissing(id, "horaConduta");
+          GsiApi.update("pacientes", id, {
+            conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs },
+            status: "Em observação obstétrica",
+            observacaoObstetrica: { origem: "Consulta médica", inicio: nowTime(), inicioTimestamp: Date.now(), reavaliacoes: [] }
+          });
+          if (atendimentoLocalOB) {
+            GsiApi.update("atendimentos", atendimentoLocalOB.id, { status: "Em observação obstétrica" });
+          }
+          showToast("Paciente encaminhado para Observação Obstétrica.");
+          closeModal();
+          return renderPage("consulta");
+        } catch (err) {
+          console.error("GSI Atendimentos reais: erro ao registrar encaminhamento para Observação Obstétrica", err);
+          button.disabled = false;
+          button.textContent = textoOriginalBotaoOB;
+          showToast(friendlySupabaseError(err, "Não foi possível registrar o encaminhamento no servidor. Tente novamente."), "warn");
+        }
+      })();
+      return;
+    }
+
     // Destinos locais (sem persistência real neste passo)
     setPatientTimeIfMissing(id, "horaConduta");
     GsiApi.update("pacientes", id, { conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs } });
-    if (values.destino === "Observação Clínica") {
-      GsiApi.update("pacientes", id, { status: "Em observação clínica", desfecho: "Observação Clínica", observacaoClinica: { origem: "Consulta Médica", inicio: nowTime(), inicioTimestamp: Date.now(), reavaliacoes: [] } });
-      showToast("Paciente encaminhado para Observação Clínica.");
-      closeModal();
-      return renderPage("consulta");
-    }
-    if (values.destino === "Observação Pediátrica") {
-      GsiApi.update("pacientes", id, { status: "Em observação pediátrica", desfecho: "Observação Pediátrica", observacaoPediatrica: { origem: "Consulta Médica", inicio: nowTime(), inicioTimestamp: Date.now(), reavaliacoes: [] } });
-      showToast("Paciente encaminhado para Observação Pediátrica.");
-      closeModal();
-      return renderPage("consulta");
-    }
-    if (values.destino === "Observação Obstétrica") {
-      GsiApi.update("pacientes", id, { status: "Em observação obstétrica", desfecho: "Observação Obstétrica", observacaoObstetrica: { origem: "Consulta Médica", inicio: nowTime(), inicioTimestamp: Date.now(), reavaliacoes: [] } });
-      showToast("Paciente encaminhado para Observação Obstétrica.");
-      closeModal();
-      return renderPage("consulta");
-    }
     if (values.destino === "Sala de Estabilização") {
       GsiApi.update("pacientes", id, { status: "Sala de estabilização", desfecho: "Sala de estabilização", estabilizacao: { origem: "Consulta Médica", inicio: nowTime(), inicioTimestamp: Date.now(), reavaliacoes: [] } });
       showToast("Paciente encaminhado para a Sala de Estabilização.");
