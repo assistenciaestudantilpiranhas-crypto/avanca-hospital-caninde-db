@@ -1236,6 +1236,116 @@ async function registrarCondutaRealObservacao(atendimentoSupabaseId, condutaPayl
   return { consulta: consultaData, observacao: obsData, atendimento: atendData };
 }
 
+// Passo 5B.4 (Fase 2) - registra encaminhamento para Sala de Estabilizacao em
+// public.consultas + public.estabilizacoes e depois atualiza public.atendimentos
+// (status_id, etapa_atual, setor_atual).
+// Estabilizacao NAO e' desfecho final: desfecho_id e hora_desfecho_ts ficam null.
+// Sequencia obrigatoria (sem RPC/transacao disponivel neste passo):
+//   1. upsert em consultas (busca por atendimento_id, atualiza se existe);
+//   2. insert em estabilizacoes com atendimento_id e inicio_ts;
+//   3. update em atendimentos (status_id, etapa_atual, setor_atual).
+// O trigger fn_validate_atendimento_transicao exige estabilizacoes previo ao
+// status em_estabilizacao — a ordem 2 → 3 e' obrigatoria.
+// Risco documentado: se o passo 2 falhar apos o passo 1 ter gravado, ficara
+// uma consulta orfa. Se o passo 3 falhar apos os passos 1 e 2, ficara uma
+// consulta e uma estabilizacao orfas sem o status refletido em atendimentos.
+// O chamador (save-conduct) controla o erro e nao altera o estado local.
+async function registrarCondutaRealEstabilizacao(atendimentoSupabaseId, condutaPayload, etapaAtual, setorAtual) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível registrar a conduta no servidor.");
+  }
+  if (!atendimentoSupabaseId) {
+    throw new Error("Atendimento real não encontrado. Inicie o atendimento antes de registrar a conduta.");
+  }
+
+  const statusId = await getStatusAtendimentoIdByCodigo("em_estabilizacao");
+  const agora = new Date().toISOString();
+  const client = window.GsiAuth.client;
+
+  // 1. Registrar/atualizar consulta com a conduta medica
+  const { data: consultasExistentes, error: errBusca } = await client
+    .from("consultas")
+    .select("id")
+    .eq("atendimento_id", atendimentoSupabaseId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (errBusca) throw errBusca;
+
+  const consultaExistente = consultasExistentes?.[0];
+  let consultaData;
+
+  if (consultaExistente) {
+    const { data, error } = await client
+      .from("consultas")
+      .update({
+        conduta: condutaPayload.conduta,
+        hipotese_diagnostica: condutaPayload.hipotese || null,
+        desfecho_proposto: condutaPayload.destino,
+        observacoes: condutaPayload.obs || null,
+        hora_fim_ts: agora
+      })
+      .eq("id", consultaExistente.id)
+      .select("id, atendimento_id, conduta, desfecho_proposto, hora_fim_ts")
+      .single();
+    if (error) throw error;
+    consultaData = data;
+  } else {
+    const { data, error } = await client
+      .from("consultas")
+      .insert({
+        atendimento_id: atendimentoSupabaseId,
+        hora_inicio_ts: agora,
+        hora_fim_ts: agora,
+        conduta: condutaPayload.conduta,
+        hipotese_diagnostica: condutaPayload.hipotese || null,
+        desfecho_proposto: condutaPayload.destino,
+        observacoes: condutaPayload.obs || null
+      })
+      .select("id, atendimento_id, conduta, desfecho_proposto, hora_fim_ts")
+      .single();
+    if (error) throw error;
+    consultaData = data;
+  }
+
+  // 2. Inserir registro em estabilizacoes (somente apos consulta confirmada)
+  const { data: estabData, error: errEstab } = await client
+    .from("estabilizacoes")
+    .insert({
+      atendimento_id: atendimentoSupabaseId,
+      inicio_ts: agora
+    })
+    .select("id, atendimento_id, inicio_ts")
+    .single();
+  if (errEstab) {
+    // Consulta ja gravada — documenta o risco antes de propagar
+    console.error("GSI Atendimentos reais: consulta gravada mas falha ao inserir em estabilizacoes. Consulta id:", consultaData?.id, errEstab);
+    throw errEstab;
+  }
+
+  // 3. Atualizar atendimentos (somente apos estabilizacao confirmada)
+  const updatePayload = {
+    status_id: statusId,
+    etapa_atual: etapaAtual
+  };
+  if (setorAtual) updatePayload.setor_atual = setorAtual;
+
+  const { data: atendData, error: errAtend } = await client
+    .from("atendimentos")
+    .update(updatePayload)
+    .eq("id", atendimentoSupabaseId)
+    .select("id, paciente_id, status_id, classificacao_risco_id, desfecho_id, queixa_principal, etapa_atual, hora_chegada_ts, hora_desfecho_ts")
+    .single();
+  if (errAtend) {
+    // Consulta e estabilizacao ja gravadas — documenta o risco antes de propagar
+    console.error("GSI Atendimentos reais: consulta e estabilizacao gravadas mas falha ao atualizar atendimento. Consulta id:", consultaData?.id, "Estabilizacao id:", estabData?.id, errAtend);
+    throw errAtend;
+  }
+
+  atendimentosReaisState.porId[atendData.id] = atendData;
+  atendimentosReaisState.porPacienteId[atendData.paciente_id] = atendData;
+  return { consulta: consultaData, estabilizacao: estabData, atendimento: atendData };
+}
+
 // Passo 5A (Fase 2) - persiste inicio da consulta medica em public.atendimentos.
 // Atualiza somente status_id (em_consulta) e etapa_atual. Nunca toca
 // paciente_id, classificacao_risco_id, desfecho_id, hora_chegada_ts,
@@ -5138,15 +5248,52 @@ function handleAction(action, button) {
       return;
     }
 
+    // Sala de Estabilização — persistência real-first (Passo 5B.4)
+    if (values.destino === "Sala de Estabilização") {
+      const pacienteLocalSE = patientById(id);
+      if (!pacienteLocalSE) return;
+      const atendimentoLocalSE = GsiApi.list("atendimentos").find((a) => a.pacienteId === id);
+      const atendimentoSupabaseIdSE = atendimentoLocalSE?.atendimentoSupabaseId;
+      if (!atendimentoSupabaseIdSE) {
+        showToast("Atendimento real não encontrado. Inicie o atendimento antes de registrar a conduta.", "warn");
+        return;
+      }
+      button.disabled = true;
+      const textoOriginalBotaoSE = button.textContent;
+      button.textContent = "Salvando...";
+      (async () => {
+        try {
+          await registrarCondutaRealEstabilizacao(
+            atendimentoSupabaseIdSE,
+            { conduta: values.conduta, hipotese: values.hipotese, destino: values.destino, obs: values.obs },
+            "Em estabilização",
+            "Sala de Estabilização"
+          );
+          setPatientTimeIfMissing(id, "horaConduta");
+          GsiApi.update("pacientes", id, {
+            conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs },
+            status: "Sala de estabilização",
+            estabilizacao: { origem: "Consulta Médica", inicio: nowTime(), inicioTimestamp: Date.now(), reavaliacoes: [] }
+          });
+          if (atendimentoLocalSE) {
+            GsiApi.update("atendimentos", atendimentoLocalSE.id, { status: "Sala de estabilização" });
+          }
+          showToast("Paciente encaminhado para a Sala de Estabilização.");
+          closeModal();
+          return renderPage("consulta");
+        } catch (err) {
+          console.error("GSI Atendimentos reais: erro ao registrar encaminhamento para Sala de Estabilização", err);
+          button.disabled = false;
+          button.textContent = textoOriginalBotaoSE;
+          showToast(friendlySupabaseError(err, "Não foi possível registrar o encaminhamento no servidor. Tente novamente."), "warn");
+        }
+      })();
+      return;
+    }
+
     // Destinos locais (sem persistência real neste passo)
     setPatientTimeIfMissing(id, "horaConduta");
     GsiApi.update("pacientes", id, { conduta: { avaliacao: values.avaliacao, hipotese: values.hipotese, conduta: values.conduta, prescricao: values.prescricao, exames: values.exames, destino: values.destino, obs: values.obs } });
-    if (values.destino === "Sala de Estabilização") {
-      GsiApi.update("pacientes", id, { status: "Sala de estabilização", desfecho: "Sala de estabilização", estabilizacao: { origem: "Consulta Médica", inicio: nowTime(), inicioTimestamp: Date.now(), reavaliacoes: [] } });
-      showToast("Paciente encaminhado para a Sala de Estabilização.");
-      closeModal();
-      return renderPage("consulta");
-    }
     if (values.destino === "Solicitar exame") {
       showToast("Conduta registrada. Abrindo solicitação de exame.");
       return openExamModal(id, "Consulta Médica");
