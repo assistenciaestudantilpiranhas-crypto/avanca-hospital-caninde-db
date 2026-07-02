@@ -809,6 +809,56 @@ async function getTipoObservacaoIdByCodigo(codigo) {
   return id;
 }
 
+// Passo 5B.6.1 (Fase 2) - cache de dom_status_transferencia (id real por codigo),
+// mesmo padrao de statusAtendimentoState/tiposObservacaoState.
+// Codigos reais: em_analise, aguardando_vaga, vaga_confirmada, concluida
+// (ver migration 20260623100001_dominios.sql).
+let statusTransferenciaState = { loaded: false, loading: false, error: null, porCodigo: {} };
+
+async function loadStatusTransferenciaDomain() {
+  if (statusTransferenciaState.loading || statusTransferenciaState.loaded) return;
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    statusTransferenciaState.error = "Sessão não carregada. Não foi possível carregar os status de transferência.";
+    return;
+  }
+  statusTransferenciaState.loading = true;
+  statusTransferenciaState.error = null;
+  try {
+    const { data, error } = await window.GsiAuth.client
+      .from("dom_status_transferencia")
+      .select("id, codigo")
+      .order("ordem");
+    if (error) throw error;
+    const porCodigo = {};
+    (data || []).forEach((row) => { porCodigo[row.codigo] = row.id; });
+    statusTransferenciaState.porCodigo = porCodigo;
+    statusTransferenciaState.loaded = true;
+  } catch (err) {
+    console.error("GSI Atendimentos reais: erro ao carregar dom_status_transferencia", err);
+    statusTransferenciaState.error = "Não foi possível carregar os status de transferência do servidor.";
+    throw err;
+  } finally {
+    statusTransferenciaState.loading = false;
+  }
+}
+
+async function getStatusTransferenciaIdByCodigo(codigo) {
+  if (!statusTransferenciaState.loaded) {
+    await loadStatusTransferenciaDomain();
+  }
+  const id = statusTransferenciaState.porCodigo[codigo];
+  if (!id) {
+    throw new Error(`Status de transferência não encontrado: ${codigo}`);
+  }
+  return id;
+}
+
+// Passo 5B.6.1 (Fase 2) - mapeamento localId (GsiApi) → UUID real (Supabase)
+// para transferencias. Populado por registrarTransferenciaReal() durante
+// save-transfer. Necessario para que transfer-status, confirm-transfer-checklist
+// e transfer-departure saibam qual UUID Supabase atualizar nos passos seguintes.
+const transferenciasReaisState = {};
+
 // Mesma lista local de sempre (GsiApi.list("atendimentos")) - hoje nenhum
 // atendimento local tem "atendimentoSupabaseId" (essa ponte ainda nao e
 // criada por nenhuma action nesta fase), entao esta funcao e' hoje um
@@ -1344,6 +1394,71 @@ async function registrarCondutaRealEstabilizacao(atendimentoSupabaseId, condutaP
   atendimentosReaisState.porId[atendData.id] = atendData;
   atendimentosReaisState.porPacienteId[atendData.paciente_id] = atendData;
   return { consulta: consultaData, estabilizacao: estabData, atendimento: atendData };
+}
+
+// Passo 5B.6.1 (Fase 2) - registra solicitacao de transferencia em
+// public.transferencias e depois atualiza public.atendimentos
+// (status_id → em_transferencia_regulada, etapa_atual, setor_atual).
+// Transferencia NAO e' desfecho final: desfecho_id e hora_desfecho_ts ficam null.
+// Sequencia obrigatoria (sem RPC/transacao disponivel neste passo):
+//   1. insert em transferencias (atendimento_id, status_id, motivo, destino,
+//      hora_solicitacao_ts + campos opcionais);
+//   2. update em atendimentos (status_id, etapa_atual, setor_atual).
+// O trigger fn_validate_atendimento_transicao exige transferencias previo ao
+// status em_transferencia_regulada — a ordem 1 → 2 e' obrigatoria.
+// Risco documentado: se o passo 2 falhar apos o passo 1 ter gravado, ficara
+// uma transferencia orfa sem o status refletido em atendimentos.
+// O chamador (save-transfer) controla o erro e nao altera o estado local.
+async function registrarTransferenciaReal(atendimentoSupabaseId, payload) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível registrar a transferência no servidor.");
+  }
+  if (!atendimentoSupabaseId) {
+    throw new Error("Atendimento real não encontrado. Inicie o atendimento antes de solicitar transferência.");
+  }
+
+  const statusEmAnaliseId = await getStatusTransferenciaIdByCodigo("em_analise");
+  const statusEmTransferenciaId = await getStatusAtendimentoIdByCodigo("em_transferencia_regulada");
+  const agora = new Date().toISOString();
+  const client = window.GsiAuth.client;
+
+  // 1. Inserir registro em transferencias
+  const { data: transData, error: errTrans } = await client
+    .from("transferencias")
+    .insert({
+      atendimento_id: atendimentoSupabaseId,
+      status_id: statusEmAnaliseId,
+      motivo: payload.motivo,
+      destino: payload.destino,
+      acompanhante: payload.acompanhante || null,
+      tipo_transporte: payload.tipoTransporte || null,
+      usou_ambulancia: payload.usouAmbulancia === "Sim" ? true : payload.usouAmbulancia === "Não" ? false : null,
+      hora_solicitacao_ts: agora
+    })
+    .select("id, atendimento_id, status_id, motivo, destino, hora_solicitacao_ts")
+    .single();
+  if (errTrans) throw errTrans;
+
+  // 2. Atualizar atendimentos (somente apos transferencia confirmada)
+  const { data: atendData, error: errAtend } = await client
+    .from("atendimentos")
+    .update({
+      status_id: statusEmTransferenciaId,
+      etapa_atual: "Em transferência regulada",
+      setor_atual: "Regulação de Transferências"
+    })
+    .eq("id", atendimentoSupabaseId)
+    .select("id, paciente_id, status_id, classificacao_risco_id, desfecho_id, queixa_principal, etapa_atual, hora_chegada_ts, hora_desfecho_ts")
+    .single();
+  if (errAtend) {
+    // Transferencia ja gravada — documenta o risco antes de propagar
+    console.error("GSI Atendimentos reais: transferencia gravada mas falha ao atualizar atendimento. Transferencia id:", transData?.id, errAtend);
+    throw errAtend;
+  }
+
+  atendimentosReaisState.porId[atendData.id] = atendData;
+  atendimentosReaisState.porPacienteId[atendData.paciente_id] = atendData;
+  return { transferencia: transData, atendimento: atendData };
 }
 
 // Passo 5A (Fase 2) - persiste inicio da consulta medica em public.atendimentos.
@@ -5303,7 +5418,6 @@ function handleAction(action, button) {
       return openPrescriptionModal(id);
     }
     if (values.destino === "Solicitar transferência" || values.destino === "Transferência regulada") {
-      GsiApi.update("pacientes", id, { desfecho: "Transferência regulada" });
       showToast("Conduta registrada. Abrindo solicitação de transferência.");
       return openTransferModal(id);
     }
@@ -5400,14 +5514,46 @@ function handleAction(action, button) {
   if (action === "save-transfer") {
     const form = byId("transferForm");
     if (!requireForm(form)) return;
+    if (button.disabled) return;
     const values = formValues(form);
     const motivo = values.motivo === "Outro" ? (values.motivoOutro || "").trim() || "Outro" : values.motivo;
     const destino = values.destino === "Outro" ? (values.destinoOutro || "").trim() || "Outro" : values.destino;
     const { motivoOutro, destinoOutro, ...rest } = values;
-    GsiApi.create("transferencias", { ...rest, motivo, destino, status: "Em analise", checklist: "Pendente", saida: "--" });
-    showToast("Solicitação enviada para Transferências.");
-    closeModal();
-    return renderPage("transferencias");
+    const pacienteIdTR = values.pacienteId;
+    const atendimentoLocalTR = GsiApi.list("atendimentos").find((a) => a.pacienteId === pacienteIdTR);
+    const atendimentoSupabaseIdTR = atendimentoLocalTR?.atendimentoSupabaseId;
+    if (!atendimentoSupabaseIdTR) {
+      showToast("Atendimento real não encontrado. Inicie o atendimento antes de solicitar transferência.", "warn");
+      return;
+    }
+    button.disabled = true;
+    const textoOriginalBotaoTR = button.textContent;
+    button.textContent = "Salvando...";
+    (async () => {
+      try {
+        const { transferencia: transReal } = await registrarTransferenciaReal(
+          atendimentoSupabaseIdTR,
+          { motivo, destino, acompanhante: rest.acompanhante, tipoTransporte: rest.tipoTransporte, usouAmbulancia: rest.usouAmbulancia }
+        );
+        const localRecord = GsiApi.create("transferencias", {
+          ...rest, motivo, destino, status: "Em analise", checklist: "Pendente", saida: "--",
+          atendimentoSupabaseId: transReal.id
+        });
+        transferenciasReaisState[localRecord.id] = transReal.id;
+        if (atendimentoLocalTR) {
+          GsiApi.update("atendimentos", atendimentoLocalTR.id, { status: "Em transferência regulada" });
+        }
+        showToast("Solicitação enviada para Transferências.");
+        closeModal();
+        return renderPage("transferencias");
+      } catch (err) {
+        console.error("GSI Atendimentos reais: erro ao registrar solicitação de transferência", err);
+        button.disabled = false;
+        button.textContent = textoOriginalBotaoTR;
+        showToast(friendlySupabaseError(err, "Não foi possível registrar a transferência no servidor. Tente novamente."), "warn");
+      }
+    })();
+    return;
   }
   if (action === "rx-status") {
     GsiApi.update("prescricoes", id, { status: button.dataset.status });
