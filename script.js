@@ -1461,6 +1461,33 @@ async function registrarTransferenciaReal(atendimentoSupabaseId, payload) {
   return { transferencia: transData, atendimento: atendData };
 }
 
+// Passo 5B.6.2 (Fase 2) - persiste aprovacao de vaga pela Regulacao de
+// Transferencia em public.transferencias. Atualiza somente status_id
+// (vaga_confirmada) e hora_aprovacao_vaga_ts. Nunca toca atendimento_id,
+// motivo, destino, hora_solicitacao_ts, hora_saida_ts, checklist_confirmado_em.
+// Nunca atualiza public.atendimentos, desfecho_id ou hora_desfecho_ts.
+async function aprovarVagaTransferenciaReal(transferenciaSupabaseId) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível aprovar a vaga no servidor.");
+  }
+  if (!transferenciaSupabaseId) {
+    throw new Error("Transferência real não encontrada. Solicite a transferência novamente antes de aprovar a vaga.");
+  }
+  const statusVagaConfirmadaId = await getStatusTransferenciaIdByCodigo("vaga_confirmada");
+  const agora = new Date().toISOString();
+  const { data, error } = await window.GsiAuth.client
+    .from("transferencias")
+    .update({
+      status_id: statusVagaConfirmadaId,
+      hora_aprovacao_vaga_ts: agora
+    })
+    .eq("id", transferenciaSupabaseId)
+    .select("id, atendimento_id, status_id, hora_aprovacao_vaga_ts")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // Passo 5A (Fase 2) - persiste inicio da consulta medica em public.atendimentos.
 // Atualiza somente status_id (em_consulta) e etapa_atual. Nunca toca
 // paciente_id, classificacao_risco_id, desfecho_id, hora_chegada_ts,
@@ -5658,7 +5685,39 @@ function handleAction(action, button) {
     return;
   }
   if (action === "transfer-status") {
-    GsiApi.update("transferencias", id, { status: button.dataset.status });
+    const novoStatus = button.dataset.status;
+    if (novoStatus === "Vaga confirmada") {
+      const transferenciaLocal = GsiApi.list("transferencias").find((t) => t.id === id);
+      const transferenciaSupabaseId = transferenciaLocal?.atendimentoSupabaseId || transferenciasReaisState[id] || null;
+      if (!transferenciaSupabaseId) {
+        showToast("Transferência real não encontrada. Solicite a transferência novamente antes de aprovar a vaga.", "warn");
+        return;
+      }
+      button.disabled = true;
+      const textoOriginalBotaoAV = button.textContent;
+      button.textContent = "Aprovando...";
+      (async () => {
+        try {
+          await aprovarVagaTransferenciaReal(transferenciaSupabaseId);
+          GsiApi.update("transferencias", id, {
+            status: "Vaga confirmada",
+            horaAprovacaoVaga: nowTime(),
+            horaAprovacaoVagaTs: Date.now()
+          });
+          transferenciasReaisState[id] = transferenciaSupabaseId;
+          showToast("Vaga confirmada pela Regulação de Transferência.");
+          return renderPage(currentPage);
+        } catch (err) {
+          console.error("GSI Atendimentos reais: erro ao aprovar vaga de transferência", err);
+          button.disabled = false;
+          button.textContent = textoOriginalBotaoAV;
+          showToast(friendlySupabaseError(err, "Não foi possível confirmar a vaga no servidor. Tente novamente."), "warn");
+        }
+      })();
+      return;
+    }
+    // Cancelamento permanece local nesta fase porque não há domínio real correspondente.
+    GsiApi.update("transferencias", id, { status: novoStatus });
     showToast("Status da transferência atualizado.");
     return renderPage(currentPage);
   }
