@@ -1488,6 +1488,50 @@ async function aprovarVagaTransferenciaReal(transferenciaSupabaseId) {
   return data;
 }
 
+// Passo 5B.6.3 (Fase 2) - persiste checklist de transferencia segura em
+// public.checklist_transferencia_itens (uma linha por item) e atualiza
+// public.transferencias.checklist_confirmado_em. Nunca altera status_id,
+// hora_saida_ts, hora_solicitacao_ts, hora_aprovacao_vaga_ts, motivo ou destino.
+// Nunca atualiza public.atendimentos, desfecho_id ou hora_desfecho_ts.
+// Risco de orfa: se os INSERTs dos itens sucederem e o UPDATE de
+// checklist_confirmado_em falhar, ficam itens sem o timestamp consolidado
+// — esses itens orfaos devem ser limpos/reconciliados manualmente ou por
+// processo de housekeeping futuro.
+async function confirmarChecklistTransferenciaReal(transferenciaSupabaseId) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível confirmar o checklist no servidor.");
+  }
+  if (!transferenciaSupabaseId) {
+    throw new Error("Transferência real não encontrada. Solicite a transferência novamente antes de confirmar o checklist.");
+  }
+  const agora = new Date().toISOString();
+  const client = window.GsiAuth.client;
+
+  // 1. Inserir uma linha por item em checklist_transferencia_itens
+  const { error: errItens } = await client
+    .from("checklist_transferencia_itens")
+    .insert(transferSafetyChecklist.map((item) => ({
+      transferencia_id: transferenciaSupabaseId,
+      item,
+      concluido: true,
+      concluido_em: agora
+    })));
+  if (errItens) throw errItens;
+
+  // 2. Atualizar checklist_confirmado_em em transferencias (somente apos itens gravados)
+  const { data, error: errTrans } = await client
+    .from("transferencias")
+    .update({ checklist_confirmado_em: agora })
+    .eq("id", transferenciaSupabaseId)
+    .select("id, atendimento_id, status_id, checklist_confirmado_em")
+    .single();
+  if (errTrans) {
+    console.error("GSI Atendimentos reais: itens de checklist gravados mas falha ao atualizar checklist_confirmado_em. Transferencia id:", transferenciaSupabaseId, errTrans);
+    throw errTrans;
+  }
+  return data;
+}
+
 // Passo 5A (Fase 2) - persiste inicio da consulta medica em public.atendimentos.
 // Atualiza somente status_id (em_consulta) e etapa_atual. Nunca toca
 // paciente_id, classificacao_risco_id, desfecho_id, hora_chegada_ts,
@@ -5725,10 +5769,35 @@ function handleAction(action, button) {
   if (action === "confirm-transfer-checklist") {
     const form = byId("transferChecklistForm");
     if (!requireForm(form)) return;
-    GsiApi.update("transferencias", id, { checklist: "Completo" });
-    showToast("Checklist de transferência concluído.");
-    closeModal();
-    return renderPage(currentPage);
+    const transferenciaLocal = GsiApi.list("transferencias").find((t) => t.id === id);
+    const transferenciaSupabaseId = transferenciaLocal?.atendimentoSupabaseId || transferenciasReaisState[id] || null;
+    if (!transferenciaSupabaseId) {
+      showToast("Transferência real não encontrada. Solicite a transferência novamente antes de confirmar o checklist.", "warn");
+      return;
+    }
+    button.disabled = true;
+    const textoOriginalBotaoCK = button.textContent;
+    button.textContent = "Confirmando...";
+    (async () => {
+      try {
+        await confirmarChecklistTransferenciaReal(transferenciaSupabaseId);
+        GsiApi.update("transferencias", id, {
+          checklist: "Completo",
+          horaChecklistTransferencia: nowTime(),
+          horaChecklistTransferenciaTs: Date.now()
+        });
+        transferenciasReaisState[id] = transferenciaSupabaseId;
+        showToast("Checklist de transferência concluído.");
+        closeModal();
+        return renderPage(currentPage);
+      } catch (err) {
+        console.error("GSI Atendimentos reais: erro ao confirmar checklist de transferência", err);
+        button.disabled = false;
+        button.textContent = textoOriginalBotaoCK;
+        showToast(friendlySupabaseError(err, "Não foi possível confirmar o checklist no servidor. Tente novamente."), "warn");
+      }
+    })();
+    return;
   }
   if (action === "transfer-departure") {
     const horarioSaida = nowTime();
