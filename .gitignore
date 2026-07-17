@@ -9,3 +9,8 @@ build/
 supabase/.branches/
 supabase/.temp/
 supabase/snippets/
+
+# Local audit/cache artifacts
+_audit_export/
+.npm-cache/
+.supabase-home/
