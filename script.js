@@ -33,19 +33,19 @@ const sectorOptions = [
 // Atencao: isto e controle de UX/visibilidade, NAO e controle de seguranca -
 // a protecao real continua sendo RLS no banco (ver migrations de RLS).
 const routePermissions = {
-  pacientes: { permissoes: ["paciente.criar"], perfis: ["Recepção", "Técnico em Enfermagem", "Médico"] },
-  atendimentos: { permissoes: ["atendimento.abrir"], perfis: ["Recepção", "Técnico em Enfermagem", "Médico", "Regulação de Transferência"] },
+  pacientes: { permissoes: ["paciente.criar"], perfis: ["Recepção", "Técnico em Enfermagem", "Médico", "Enfermeiro"] },
+  atendimentos: { permissoes: ["atendimento.abrir"], perfis: ["Recepção", "Técnico em Enfermagem", "Médico", "Regulação de Transferência", "Enfermeiro"] },
   "painel-chamada": { permissoes: ["atendimento.abrir"], perfis: ["Recepção", "Técnico em Enfermagem", "Médico"] },
-  risco: { permissoes: ["triagem.classificar"], perfis: ["Técnico em Enfermagem"] },
-  triagem: { permissoes: ["triagem.classificar"], perfis: ["Técnico em Enfermagem"] },
+  risco: { permissoes: ["triagem.classificar"], perfis: ["Técnico em Enfermagem", "Enfermeiro"] },
+  triagem: { permissoes: ["triagem.classificar"], perfis: ["Técnico em Enfermagem", "Enfermeiro"] },
   consulta: { permissoes: ["consulta.iniciar", "consulta.registrar_conduta"], perfis: [] },
-  enfermagem: { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Técnico em Enfermagem"] },
+  enfermagem: { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Técnico em Enfermagem", "Enfermeiro"] },
   farmacia: { permissoes: ["prescricao.dispensar", "estoque.movimentar"], perfis: ["Farmácia"] },
   exames: { permissoes: ["exame.visualizar", "exame.solicitar"], perfis: ["Técnico em RX"] },
-  estabilizacao: { permissoes: [], perfis: ["Técnico em Enfermagem", "Médico"] },
-  "observacao-clinica": { permissoes: ["observacao.reavaliar"], perfis: ["Técnico em Enfermagem", "Médico"] },
-  "observacao-pediatrica": { permissoes: ["observacao.reavaliar"], perfis: ["Técnico em Enfermagem", "Médico"] },
-  "observacao-obstetrica": { permissoes: ["observacao.reavaliar"], perfis: ["Técnico em Enfermagem", "Médico"] },
+  estabilizacao: { permissoes: [], perfis: ["Técnico em Enfermagem", "Médico", "Enfermeiro"] },
+  "observacao-clinica": { permissoes: ["observacao.reavaliar"], perfis: ["Técnico em Enfermagem", "Médico", "Enfermeiro"] },
+  "observacao-pediatrica": { permissoes: ["observacao.reavaliar"], perfis: ["Técnico em Enfermagem", "Médico", "Enfermeiro"] },
+  "observacao-obstetrica": { permissoes: ["observacao.reavaliar"], perfis: ["Técnico em Enfermagem", "Médico", "Enfermeiro"] },
   transferencias: { permissoes: ["transferencia.solicitar", "transferencia.aprovar_vaga", "transferencia.confirmar_checklist", "transferencia.confirmar_saida"], perfis: ["Regulação de Transferência", "Enfermeiro"] },
   // Indicadores e Relatorios restritos somente a Administracao - perfis: []
   // e permissoes: [] fazem isRouteAllowed/isActionAllowed negarem para todo
@@ -113,7 +113,7 @@ function isActionAllowed(rule) {
 // Triagem/Classificacao (classify-risk, save-risk, open-triage-modal,
 // save-triage, call-to-triage). Demais modulos permanecem sem gate nesta
 // etapa.
-const TRIAGEM_ACTION_RULE = { permissoes: ["triagem.classificar"], perfis: ["Técnico em Enfermagem"] };
+const TRIAGEM_ACTION_RULE = { permissoes: ["triagem.classificar"], perfis: ["Técnico em Enfermagem", "Enfermeiro"] };
 
 // Expansao da Etapa 2.2: regras de permissao para as actions de
 // Pacientes/Atendimentos (open-register-patient, save-patient, call-patient,
@@ -135,7 +135,7 @@ const PACIENTE_EDIT_ACTION_RULE = { permissoes: ["paciente.criar"], perfis: ["Re
 // e open-prescription NAO recebem gate aqui de proposito - sao botoes
 // reusados tambem em Consulta e Observacao, sem diferenciacao de contexto
 // suficiente ainda (ver analise da expansao para Enfermagem).
-const ENFERMAGEM_ACTION_RULE = { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Técnico em Enfermagem"] };
+const ENFERMAGEM_ACTION_RULE = { permissoes: ["enfermagem.evolucao.registrar"], perfis: ["Técnico em Enfermagem", "Enfermeiro"] };
 
 // Expansao da Etapa 2.2: regras para as actions exclusivas do modulo
 // Consulta Medica. open-exam-request, open-prescription e
@@ -224,7 +224,7 @@ const TRANSFERENCIA_CONFIRMAR_SAIDA_ACTION_RULE = {
 // save-observation-reassess com o campo 'modulo' determinando o destino.
 const OBSERVACAO_REAVALIAR_ACTION_RULE = {
   permissoes: ["observacao.reavaliar"],
-  perfis: ["Técnico em Enfermagem", "Médico"]
+  perfis: ["Técnico em Enfermagem", "Médico", "Enfermeiro"]
 };
 
 // Varredura final: reset-demo apaga e restaura TODOS os dados do prototipo -
@@ -249,7 +249,7 @@ const CONFIGURACOES_ACTION_RULE = {
 // checklist (apenas visualizar).
 const ESTABILIZACAO_CHECKLIST_ACTION_RULE = {
   permissoes: ["estabilizacao.checklist_item"],
-  perfis: ["Técnico em Enfermagem"]
+  perfis: ["Técnico em Enfermagem", "Enfermeiro"]
 };
 
 // Modulo Auditoria (Fase 1, somente leitura): nao existe policy de RLS
@@ -626,6 +626,16 @@ function atendimentoRealById(id) {
 // demanda (lazy) na primeira chamada, sem exigir um disparo separado em
 // renderPage.
 let statusAtendimentoState = { loaded: false, loading: false, error: null, porCodigo: {} };
+
+const ATENDIMENTO_ATIVO_STATUS_CODIGOS = [
+  "aguardando_triagem",
+  "em_triagem",
+  "aguardando_consulta",
+  "em_consulta",
+  "em_observacao",
+  "em_estabilizacao",
+  "em_transferencia_regulada"
+];
 
 async function loadStatusAtendimentoDomain() {
   if (statusAtendimentoState.loading || statusAtendimentoState.loaded) return;
@@ -1008,6 +1018,18 @@ async function createPacienteRealFromLocal(payload) {
     .select("id, nome, data_nascimento, cpf, cartao_sus, telefone, municipio, perfil_residencia")
     .single();
   if (error) throw error;
+  if (!data?.id) {
+    throw new Error("Servidor nao confirmou o cadastro do paciente.");
+  }
+  const { data: pacienteConfirmado, error: erroConfirmacao } = await window.GsiAuth.client
+    .from("pacientes")
+    .select("id")
+    .eq("id", data.id)
+    .maybeSingle();
+  if (erroConfirmacao) throw erroConfirmacao;
+  if (!pacienteConfirmado?.id) {
+    throw new Error("Cadastro nao confirmado em public.pacientes. Operacao local cancelada.");
+  }
   return data;
 }
 
@@ -1043,6 +1065,58 @@ async function createAtendimentoRealFromLocal(pacienteReal, pacienteLocal) {
   return data;
 }
 
+async function obterAtendimentoAtivoReal(pacienteSupabaseId) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessao nao carregada. Nao foi possivel buscar atendimento ativo no servidor.");
+  }
+  if (!pacienteSupabaseId) {
+    throw new Error("Paciente sem cadastro real vinculado. Nao foi possivel buscar atendimento ativo.");
+  }
+  const client = window.GsiAuth.client;
+  const { data: statusAtivos, error: statusError } = await client
+    .from("dom_status_atendimento")
+    .select("id,codigo")
+    .in("codigo", ATENDIMENTO_ATIVO_STATUS_CODIGOS);
+  if (statusError) throw statusError;
+  const statusIds = (statusAtivos || []).map((status) => status.id).filter(Boolean);
+  const codigosEncontrados = new Set((statusAtivos || []).map((status) => status.codigo));
+  const codigosAusentes = ATENDIMENTO_ATIVO_STATUS_CODIGOS.filter((codigo) => !codigosEncontrados.has(codigo));
+  if (codigosAusentes.length) {
+    console.warn("GSI Atendimentos reais: status ativos nao encontrados no dominio:", codigosAusentes);
+  }
+  if (!statusIds.length) {
+    throw new Error("Nenhum status ativo valido encontrado no servidor.");
+  }
+  const { data, error } = await client
+    .from("atendimentos")
+    .select("id, paciente_id, status_id, classificacao_risco_id, desfecho_id, queixa_principal, etapa_atual, setor_atual, hora_chegada_ts, hora_desfecho_ts")
+    .eq("paciente_id", pacienteSupabaseId)
+    .in("status_id", statusIds)
+    .order("hora_chegada_ts", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) {
+    atendimentosReaisState.porId[data.id] = data;
+    atendimentosReaisState.porPacienteId[data.paciente_id] = data;
+  }
+  return data || null;
+}
+
+async function obterOuCriarAtendimentoAtivoReal(pacienteReal, pacienteLocal) {
+  if (!pacienteReal || !pacienteReal.id) {
+    throw new Error("Paciente sem cadastro real vinculado. Nao foi possivel abrir o atendimento no servidor.");
+  }
+  const atendimentoAtivo = await obterAtendimentoAtivoReal(pacienteReal.id);
+  if (atendimentoAtivo) {
+    return { atendimento: atendimentoAtivo, criado: false };
+  }
+  const atendimento = await createAtendimentoRealFromLocal(pacienteReal, pacienteLocal);
+  atendimentosReaisState.porId[atendimento.id] = atendimento;
+  atendimentosReaisState.porPacienteId[atendimento.paciente_id] = atendimento;
+  return { atendimento, criado: true };
+}
+
 // Fase 2 (Passo 4) - atualiza o episodio real ao concluir a triagem.
 // Somente UPDATE (nunca insert aqui). Atualiza so' status_id (->
 // aguardando_consulta), classificacao_risco_id (-> classificacao real do
@@ -1076,6 +1150,64 @@ async function updateAtendimentoRealTriagem(atendimentoSupabaseId, pacienteLocal
   if (error) throw error;
   atendimentosReaisState.porId[data.id] = data;
   atendimentosReaisState.porPacienteId[data.paciente_id] = data;
+  return data;
+}
+
+// Registra a triagem clinica real antes de avancar o atendimento para consulta.
+// Usa INSERT na primeira gravacao e UPDATE idempotente se a triagem do
+// atendimento ja existir, evitando duplicar o registro em novo clique.
+async function registrarTriagemReal(atendimentoSupabaseId, triagemPayload) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessao nao carregada. Nao foi possivel salvar a triagem no servidor.");
+  }
+  if (!atendimentoSupabaseId) {
+    throw new Error("Atendimento sem cadastro real vinculado. Nao foi possivel salvar a triagem no servidor.");
+  }
+  const client = window.GsiAuth.client;
+  const usuario = typeof window.GsiAuth.getCurrentUser === "function" ? window.GsiAuth.getCurrentUser() : null;
+  const agora = new Date();
+  const horaInicioTs = Number.isFinite(triagemPayload?.horaInicioTriagemTs)
+    ? new Date(triagemPayload.horaInicioTriagemTs).toISOString()
+    : agora.toISOString();
+  const horaFimTs = agora.toISOString();
+  const row = {
+    atendimento_id: atendimentoSupabaseId,
+    profissional_id: usuario ? usuario.id : null,
+    classificacao_sugerida_id: triagemPayload.classificacaoSugeridaId,
+    classificacao_confirmada_id: triagemPayload.classificacaoConfirmadaId,
+    hora_inicio_ts: horaInicioTs,
+    hora_fim_ts: horaFimTs,
+    historia_breve: triagemPayload.historiaBreve || null,
+    sinais_vitais: triagemPayload.sinaisVitais || null,
+    justificativa_classificacao: triagemPayload.justificativaClassificacao || null,
+    prioridade: triagemPayload.prioridade || null,
+    orientacao_inicial: triagemPayload.orientacaoInicial || null,
+    updated_by: usuario ? usuario.id : null
+  };
+  const { data: existente, error: erroBusca } = await client
+    .from("triagens")
+    .select("id")
+    .eq("atendimento_id", atendimentoSupabaseId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (erroBusca) throw erroBusca;
+  if (existente?.id) {
+    const { data, error } = await client
+      .from("triagens")
+      .update(row)
+      .eq("id", existente.id)
+      .select("id, atendimento_id, classificacao_sugerida_id, classificacao_confirmada_id, hora_inicio_ts, hora_fim_ts")
+      .single();
+    if (error) throw error;
+    return data;
+  }
+  const { data, error } = await client
+    .from("triagens")
+    .insert({ ...row, created_by: usuario ? usuario.id : null })
+    .select("id, atendimento_id, classificacao_sugerida_id, classificacao_confirmada_id, hora_inicio_ts, hora_fim_ts")
+    .single();
+  if (error) throw error;
   return data;
 }
 
@@ -1535,6 +1667,58 @@ async function confirmarChecklistTransferenciaReal(transferenciaSupabaseId) {
     throw errTrans;
   }
   return data;
+}
+
+// Passo 5B.6.4 (Fase 2) - persiste saida final da transferencia regulada.
+// Sequencia obrigatoria (sem RPC/transacao disponivel):
+//   1. UPDATE public.transferencias: status_id = concluida, hora_saida_ts;
+//   2. UPDATE public.atendimentos: status_id = desfecho_registrado,
+//      desfecho_id = transferencia_regulada, hora_desfecho_ts,
+//      etapa_atual, setor_atual.
+// Risco documentado: se o passo 1 suceder e o passo 2 falhar, a transferencia
+// ficara concluida mas o atendimento permanece em_transferencia_regulada.
+// O chamador (transfer-departure) controla o erro e exibe aviso ao usuario.
+async function confirmarSaidaTransferenciaReal(transferenciaSupabaseId, atendimentoSupabaseId) {
+  if (!window.GsiAuth || !window.GsiAuth.client) {
+    throw new Error("Sessão não carregada. Não foi possível confirmar a saída no servidor.");
+  }
+  if (!transferenciaSupabaseId) {
+    throw new Error("Transferência real não encontrada. Solicite a transferência novamente antes de confirmar a saída.");
+  }
+  const agora = new Date().toISOString();
+  const client = window.GsiAuth.client;
+
+  // 1. Atualizar transferencias: status concluida + hora_saida_ts
+  const statusConcluidaId = await getStatusTransferenciaIdByCodigo("concluida");
+  const { error: errTransf } = await client
+    .from("transferencias")
+    .update({ status_id: statusConcluidaId, hora_saida_ts: agora })
+    .eq("id", transferenciaSupabaseId);
+  if (errTransf) throw errTransf;
+
+  // 2. Atualizar atendimentos: desfecho registrado (so' se atendimentoSupabaseId disponivel)
+  if (!atendimentoSupabaseId) {
+    console.warn("GSI Atendimentos reais: atendimento real nao encontrado ao confirmar saida de transferencia — atendimento nao atualizado.");
+    return;
+  }
+  const [statusDesfechoId, desfechoId] = await Promise.all([
+    getStatusAtendimentoIdByCodigo("desfecho_registrado"),
+    getDesfechoIdByCodigo("transferencia_regulada")
+  ]);
+  const { error: errAtend } = await client
+    .from("atendimentos")
+    .update({
+      status_id: statusDesfechoId,
+      desfecho_id: desfechoId,
+      hora_desfecho_ts: agora,
+      etapa_atual: "Transferência concluída",
+      setor_atual: "Transferência regulada"
+    })
+    .eq("id", atendimentoSupabaseId);
+  if (errAtend) {
+    console.error("GSI Atendimentos reais: transferencia concluida mas falha ao atualizar atendimento. atendimento_id:", atendimentoSupabaseId, errAtend);
+    throw errAtend;
+  }
 }
 
 // Passo 5A (Fase 2) - persiste inicio da consulta medica em public.atendimentos.
@@ -4942,9 +5126,7 @@ function handleAction(action, button) {
           pacienteReal = await createPacienteRealFromLocal(pacienteLocal);
           pacientesReaisState.porId[pacienteReal.id] = pacienteReal;
         }
-        const atendimentoReal = await createAtendimentoRealFromLocal(pacienteReal, pacienteLocal);
-        atendimentosReaisState.porId[atendimentoReal.id] = atendimentoReal;
-        atendimentosReaisState.porPacienteId[atendimentoReal.paciente_id] = atendimentoReal;
+        const { atendimento: atendimentoReal } = await obterOuCriarAtendimentoAtivoReal(pacienteReal, pacienteLocal);
         // Real criado com sucesso - so' agora atualiza/cria o local, com as
         // pontes. Nao ha fallback local silencioso: se qualquer chamada
         // acima falhar, o catch abaixo impede que estas linhas executem.
@@ -5049,6 +5231,7 @@ function handleAction(action, button) {
         // fim da cadeia, permitia que um erro de classificacao acontecesse
         // DEPOIS de ja' ter promovido paciente/criado atendimento reais).
         const classificacaoId = await getClassificacaoRiscoIdByCodigo(normalizeText(values.classificacao || ""));
+        const classificacaoSugeridaId = await getClassificacaoRiscoIdByCodigo(normalizeText(values.classificacaoSugerida || values.classificacao || ""));
         // Fluxo ideal: atendimento real ja existe (via start-care). Fluxo
         // alternativo: paciente e/ou atendimento ainda nao tem ponte - cria
         // agora, com os dados atuais do formulario, em vez de bloquear.
@@ -5056,16 +5239,36 @@ function handleAction(action, button) {
           ? (pacientesReaisState.porId[pacienteLocal.pacienteSupabaseId] || { id: pacienteLocal.pacienteSupabaseId })
           : null;
         if (!pacienteReal) {
+          // Enfermeiro não pode criar paciente automaticamente — exige Recepção.
+          if (!isActionAllowed(PACIENTE_CREATE_ACTION_RULE)) {
+            throw new Error("Paciente sem registro no sistema. Solicite à Recepção que abra o atendimento antes de iniciar a triagem.");
+          }
           pacienteReal = await createPacienteRealFromLocal(pacienteLocal);
           pacientesReaisState.porId[pacienteReal.id] = pacienteReal;
         }
         let atendimentoSupabaseId = atendimentoLocalExistente?.atendimentoSupabaseId;
         if (!atendimentoSupabaseId) {
-          const atendimentoReal = await createAtendimentoRealFromLocal(pacienteReal, { ...pacienteLocal, queixa: values.queixa || pacienteLocal.queixa });
-          atendimentoSupabaseId = atendimentoReal.id;
-          atendimentosReaisState.porId[atendimentoReal.id] = atendimentoReal;
-          atendimentosReaisState.porPacienteId[atendimentoReal.paciente_id] = atendimentoReal;
+          // Enfermeiro não pode abrir atendimento automaticamente — exige Recepção.
+          const atendimentoAtivo = await obterAtendimentoAtivoReal(pacienteReal.id);
+          if (atendimentoAtivo) atendimentoSupabaseId = atendimentoAtivo.id;
+          if (!atendimentoSupabaseId && !isActionAllowed(ATENDIMENTO_OPEN_ACTION_RULE)) {
+            throw new Error("Atendimento não encontrado no sistema. Solicite à Recepção que abra o atendimento antes de salvar a triagem.");
+          }
+          if (!atendimentoSupabaseId) {
+            const resultadoAtendimento = await obterOuCriarAtendimentoAtivoReal(pacienteReal, { ...pacienteLocal, queixa: values.queixa || pacienteLocal.queixa });
+            atendimentoSupabaseId = resultadoAtendimento.atendimento.id;
+          }
         }
+        await registrarTriagemReal(atendimentoSupabaseId, {
+          classificacaoSugeridaId,
+          classificacaoConfirmadaId: classificacaoId,
+          horaInicioTriagemTs: pacienteLocal.horaInicioTriagemTs,
+          historiaBreve: values.queixa,
+          sinaisVitais,
+          justificativaClassificacao: values.justificativaClassificacao,
+          prioridade: values.classificacao,
+          orientacaoInicial: values.obs
+        });
         await updateAtendimentoRealTriagem(atendimentoSupabaseId, { ...pacienteLocal, classificacao: values.classificacao }, classificacaoId);
 
         // Real OK - so' agora grava local, com as pontes. Nao ha fallback
@@ -5508,29 +5711,47 @@ function handleAction(action, button) {
     const textoOriginalBotao = button.textContent;
     button.disabled = true;
     button.textContent = "Salvando...";
-    createPacienteRealFromLocal(payload)
-      .then((pacienteReal) => {
-        // Cadastro real criado com sucesso - cria o registro local (status/
-        // fila/demonstrativo, fora do escopo desta fase) com a referencia
-        // pacienteSupabaseId, e ja popula o cache em memoria diretamente
-        // (sem precisar de um novo round-trip via loadPacientesReais()).
-        GsiApi.create("pacientes", { ...payload, status: "Aguardando triagem", horaChegada: nowTime(), horaChegadaTs: Date.now(), pacienteSupabaseId: pacienteReal.id });
+    (async () => {
+      try {
+        console.info("[GSI save-patient] inicio", payload);
+        const pacienteReal = await createPacienteRealFromLocal(payload);
+        console.info("[GSI save-patient] paciente real criado", pacienteReal);
         pacientesReaisState.porId[pacienteReal.id] = pacienteReal;
-        showToast(pacienteReal._alreadyExisted ? "Paciente já existia no cadastro real. Registro local vinculado ao cadastro existente." : "Paciente cadastrado e adicionado na tabela.");
+        // Hora de chegada usada pelo atendimento real.
+        const horaChegadaTs = Date.now();
+        const pacienteLocalPayload = { ...payload, status: "Aguardando triagem", horaChegada: nowTime(), horaChegadaTs, pacienteSupabaseId: pacienteReal.id };
+        // Abre o atendimento inicial automaticamente, evitando que o paciente
+        // fique sem episodio real em public.atendimentos e bloqueie a triagem
+        // pelo Enfermeiro (que nao tem permissao para abrir atendimento).
+        // Passa um objeto minimo compativel com createAtendimentoRealFromLocal:
+        // horaChegadaTs para hora_chegada_ts e queixa para queixa_principal.
+        const resultadoAtendimento = await obterOuCriarAtendimentoAtivoReal(pacienteReal, pacienteLocalPayload);
+        console.info("[GSI save-patient] atendimento ativo", resultadoAtendimento);
+        const atendimentoReal = resultadoAtendimento.atendimento;
+        // Real criado com sucesso — grava local com as duas pontes.
+        const pacienteLocalRecord = GsiApi.create("pacientes", pacienteLocalPayload);
+        GsiApi.create("atendimentos", {
+          pacienteId: pacienteLocalRecord.id,
+          chegada: nowTime(),
+          profissional: "Recepção",
+          status: "Aguardando triagem",
+          espera: "00:00",
+          atendimentoSupabaseId: atendimentoReal.id
+        });
+        showToast(!resultadoAtendimento.criado
+          ? "Paciente cadastrado e atendimento ativo localizado para triagem."
+          : "Paciente cadastrado e atendimento aberto para triagem.");
         closeModal();
         renderPage("pacientes");
-      })
-      .catch((err) => {
-        // Nao cria fallback local silencioso de proposito - se o cadastro
-        // real falhar (rede, RLS, validacao), o paciente NAO e criado em
-        // lugar nenhum, para nao divergir Supabase/localStorage as
-        // escondidas do usuario. Modal permanece aberto com os dados
-        // digitados intactos (nenhum reset de formulario acontece aqui).
-        console.error("GSI Pacientes reais: erro ao criar paciente real", err);
+      } catch (err) {
+        // Sem fallback local silencioso: se paciente ou atendimento real
+        // falharem, nada e gravado localmente para nao divergir do Supabase.
+        console.error("[GSI save-patient] erro real completo", err);
         button.disabled = false;
         button.textContent = textoOriginalBotao;
-        showToast(friendlySupabaseError(err, "Não foi possível cadastrar o paciente no servidor. Tente novamente."), "warn");
-      });
+        showToast(friendlySupabaseError(err, "Nao foi possivel cadastrar no servidor. Verifique a conexao com o Supabase."), "warn");
+      }
+    })();
     return;
   }
   if (action === "open-edit-patient-modal") return openEditPatientModal(id);
@@ -5808,31 +6029,60 @@ function handleAction(action, button) {
     return;
   }
   if (action === "transfer-departure") {
-    const horarioSaida = nowTime();
-    const saidaTs = Date.now();
-    GsiApi.update("transferencias", id, {
-      status: "Concluida",
-      saida: horarioSaida,
-      horaSaidaTransferencia: horarioSaida,
-      horaSaidaTransferenciaTs: saidaTs,
-      desfechoFinal: "Transferência regulada",
-      horaDesfechoFinal: horarioSaida,
-      horaDesfechoFinalTs: saidaTs
-    });
-    const transferencia = GsiApi.list("transferencias").find((t) => t.id === id);
-    if (transferencia?.pacienteId) {
-      setPatientTimeIfMissing(transferencia.pacienteId, "horaDesfecho");
-      const paciente = patientById(transferencia.pacienteId) || {};
-      GsiApi.update("pacientes", transferencia.pacienteId, {
-        status: "Transferência regulada",
-        desfecho: "Transferência regulada",
+    if (button.disabled) return;
+    const textoOriginalBotaoDep = button.textContent;
+    button.disabled = true;
+    button.textContent = "Registrando...";
+    (async () => {
+      const horarioSaida = nowTime();
+      const saidaTs = Date.now();
+      // 1. Atualiza local primeiro (reversível localmente se real falhar)
+      GsiApi.update("transferencias", id, {
+        status: "Concluida",
+        saida: horarioSaida,
+        horaSaidaTransferencia: horarioSaida,
+        horaSaidaTransferenciaTs: saidaTs,
         desfechoFinal: "Transferência regulada",
-        horaDesfechoFinal: paciente.horaDesfechoFinal || horarioSaida,
-        horaDesfechoFinalTs: paciente.horaDesfechoFinalTs || saidaTs
+        horaDesfechoFinal: horarioSaida,
+        horaDesfechoFinalTs: saidaTs
       });
-    }
-    showToast("Saída do paciente registrada.");
-    return renderPage(currentPage);
+      const transferencia = GsiApi.list("transferencias").find((t) => t.id === id);
+      if (transferencia?.pacienteId) {
+        setPatientTimeIfMissing(transferencia.pacienteId, "horaDesfecho");
+        const paciente = patientById(transferencia.pacienteId) || {};
+        GsiApi.update("pacientes", transferencia.pacienteId, {
+          status: "Transferência regulada",
+          desfecho: "Transferência regulada",
+          desfechoFinal: "Transferência regulada",
+          horaDesfechoFinal: paciente.horaDesfechoFinal || horarioSaida,
+          horaDesfechoFinalTs: paciente.horaDesfechoFinalTs || saidaTs
+        });
+      }
+      // 2. Persiste no banco real (se sessão disponível)
+      const transferenciaSupabaseId = transferenciasReaisState[id];
+      const atendimentoSupabaseId = (() => {
+        if (!transferencia?.pacienteId) return null;
+        const atend = GsiApi.list("atendimentos").find((a) => a.pacienteId === transferencia.pacienteId);
+        return atend?.atendimentoSupabaseId || null;
+      })();
+      if (window.GsiAuth && window.GsiAuth.client && transferenciaSupabaseId) {
+        try {
+          await confirmarSaidaTransferenciaReal(transferenciaSupabaseId, atendimentoSupabaseId);
+        } catch (err) {
+          console.error("GSI Atendimentos reais: erro ao persistir saida de transferencia no banco", err);
+          // Avisa mas não reverte local: a saída já está registrada no protótipo.
+          showToast(friendlySupabaseError(err, "Saída registrada localmente, mas houve erro ao salvar no servidor. Verifique o banco."), "warn");
+          button.disabled = false;
+          button.textContent = textoOriginalBotaoDep;
+          return renderPage(currentPage);
+        }
+      }
+      showToast("Saída do paciente registrada.");
+      button.disabled = false;
+      button.textContent = textoOriginalBotaoDep;
+      renderPage(currentPage);
+    })();
+    return;
   }
   if (action === "generate-report") return openReportPreview(button.dataset.nome || "Relatório");
   if (action === "open-mobilidade-report") return openMobilidadeReportModal();
