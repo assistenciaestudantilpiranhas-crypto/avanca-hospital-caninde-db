@@ -1,0 +1,23 @@
+﻿{
+  "name": "avanca-hospital-caninde-db",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Camada de banco e frontend estÃ¡tico do GSI ONE / AvanÃ§a Hospital CanindÃ©, com fundaÃ§Ã£o mÃ­nima de QA.",
+  "scripts": {
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:watch": "vitest --watch",
+    "lint": "eslint \"tests/**/*.js\" \"*.config.mjs\"",
+    "lint:check": "npm run lint",
+    "format": "prettier --write \"tests/**/*.js\" \"*.config.mjs\" \"package.json\" \".prettierrc\" \"docs/GSI_ONE_QA_SETUP_6B2.md\"",
+    "format:check": "prettier --check \"tests/**/*.js\" \"*.config.mjs\" \"package.json\" \".prettierrc\" \"docs/GSI_ONE_QA_SETUP_6B2.md\"",
+    "qa": "npm run lint && npm run format:check && npm run test:run"
+  },
+  "devDependencies": {
+    "eslint": "^10.7.0",
+    "globals": "^17.7.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.9.5",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,15 @@
+node_modules/
+package-lock.json
+script.js
+api.js
+auth.js
+index.html
+style.css
+supabase/migrations/
+supabase/.branches/
+supabase/.temp/
+supabase/snippets/
+dist/
+build/
+.netlify/
+_audit_export/
