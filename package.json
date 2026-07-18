@@ -2,16 +2,16 @@
   "name": "avanca-hospital-caninde-db",
   "version": "0.0.0",
   "private": true,
-  "description": "Camada de banco e frontend estÃ¡tico do GSI ONE / AvanÃ§a Hospital CanindÃ©, com fundaÃ§Ã£o mÃ­nima de QA.",
+  "description": "Camada de banco e frontend estÃƒÂ¡tico do GSI ONE / AvanÃƒÂ§a Hospital CanindÃƒÂ©, com fundaÃƒÂ§ÃƒÂ£o mÃƒÂ­nima de QA.",
   "scripts": {
     "test": "vitest",
     "test:run": "vitest run",
     "test:watch": "vitest --watch",
     "lint": "eslint \"tests/**/*.js\" \"src/**/*.js\" \"*.config.mjs\"",
     "lint:check": "npm run lint",
-    "format": "prettier --write \"tests/**/*.js\" \"src/**/*.js\" \"*.config.mjs\" \"package.json\" \".prettierrc\" \"docs/GSI_ONE_QA_SETUP_6B2.md\" \"docs/GSI_ONE_TESTES_UNITARIOS_PERMISSOES_6B3.md\"",
-    "format:check": "prettier --check \"tests/**/*.js\" \"src/**/*.js\" \"*.config.mjs\" \"package.json\" \".prettierrc\" \"docs/GSI_ONE_QA_SETUP_6B2.md\" \"docs/GSI_ONE_TESTES_UNITARIOS_PERMISSOES_6B3.md\"",
-    "qa": "npm run lint && npm run format:check && npm run test:run"
+    "format": "prettier --write \"tests/**/*.js\" \"src/**/*.js\" \"*.config.mjs\" \"package.json\" \".prettierrc\" \"docs/GSI_ONE_QA_SETUP_6B2.md\" \"docs/GSI_ONE_TESTES_UNITARIOS_PERMISSOES_6B3.md\" \"docs/GSI_ONE_TESTES_AUTENTICACAO_SESSAO_6B4.md\"",
+    "format:check": "prettier --check \"tests/**/*.js\" \"src/**/*.js\" \"*.config.mjs\" \"package.json\" \".prettierrc\" \"docs/GSI_ONE_QA_SETUP_6B2.md\" \"docs/GSI_ONE_TESTES_UNITARIOS_PERMISSOES_6B3.md\" \"docs/GSI_ONE_TESTES_AUTENTICACAO_SESSAO_6B4.md\"",
+    "qa": "npm run lint \u0026\u0026 npm run format:check \u0026\u0026 npm run test:run"
   },
   "devDependencies": {
     "eslint": "^10.7.0",
