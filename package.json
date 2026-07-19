@@ -2,15 +2,15 @@
   "name": "avanca-hospital-caninde-db",
   "version": "0.0.0",
   "private": true,
-  "description": "Camada de banco e frontend estÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡tico do GSI ONE / AvanÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§a Hospital CanindÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©, com fundaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â£o mÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â­nima de QA.",
+  "description": "Camada de banco e frontend estÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡tico do GSI ONE / AvanÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§a Hospital CanindÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â©, com fundaÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â£o mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â­nima de QA.",
   "scripts": {
     "test": "vitest",
     "test:run": "vitest run",
     "test:watch": "vitest --watch",
     "lint": "eslint \"tests/**/*.js\" \"src/**/*.js\" \"*.config.mjs\"",
     "lint:check": "npm run lint",
-    "format": "prettier --write \"tests/**/*.js\" \"src/**/*.js\" \"*.config.mjs\" \"package.json\" \".prettierrc\" \"docs/GSI_ONE_QA_SETUP_6B2.md\" \"docs/GSI_ONE_TESTES_UNITARIOS_PERMISSOES_6B3.md\" \"docs/GSI_ONE_TESTES_AUTENTICACAO_SESSAO_6B4.md\" \"docs/GSI_ONE_TESTES_PACIENTES_ATENDIMENTO_6B5.md\" \"docs/GSI_ONE_TESTES_FLUXO_RECEPCAO_TRIAGEM_6B6.md\"",
-    "format:check": "prettier --check \"tests/**/*.js\" \"src/**/*.js\" \"*.config.mjs\" \"package.json\" \".prettierrc\" \"docs/GSI_ONE_QA_SETUP_6B2.md\" \"docs/GSI_ONE_TESTES_UNITARIOS_PERMISSOES_6B3.md\" \"docs/GSI_ONE_TESTES_AUTENTICACAO_SESSAO_6B4.md\" \"docs/GSI_ONE_TESTES_PACIENTES_ATENDIMENTO_6B5.md\" \"docs/GSI_ONE_TESTES_FLUXO_RECEPCAO_TRIAGEM_6B6.md\"",
+    "format": "prettier --write \"tests/**/*.js\" \"src/**/*.js\" \"*.config.mjs\" \"package.json\" \".prettierrc\" \"docs/GSI_ONE_QA_SETUP_6B2.md\" \"docs/GSI_ONE_TESTES_UNITARIOS_PERMISSOES_6B3.md\" \"docs/GSI_ONE_TESTES_AUTENTICACAO_SESSAO_6B4.md\" \"docs/GSI_ONE_TESTES_PACIENTES_ATENDIMENTO_6B5.md\" \"docs/GSI_ONE_TESTES_FLUXO_RECEPCAO_TRIAGEM_6B6.md\" \"docs/GSI_ONE_TESTES_TRANSFERENCIA_6B7.md\"",
+    "format:check": "prettier --check \"tests/**/*.js\" \"src/**/*.js\" \"*.config.mjs\" \"package.json\" \".prettierrc\" \"docs/GSI_ONE_QA_SETUP_6B2.md\" \"docs/GSI_ONE_TESTES_UNITARIOS_PERMISSOES_6B3.md\" \"docs/GSI_ONE_TESTES_AUTENTICACAO_SESSAO_6B4.md\" \"docs/GSI_ONE_TESTES_PACIENTES_ATENDIMENTO_6B5.md\" \"docs/GSI_ONE_TESTES_FLUXO_RECEPCAO_TRIAGEM_6B6.md\" \"docs/GSI_ONE_TESTES_TRANSFERENCIA_6B7.md\"",
     "qa": "npm run lint \u0026\u0026 npm run format:check \u0026\u0026 npm run test:run"
   },
   "devDependencies": {
