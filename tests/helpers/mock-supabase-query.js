@@ -2,6 +2,9 @@ import { vi } from "vitest";
 
 export function createMockSupabaseQuery(tables = {}) {
   const calls = [];
+  const normalizedTables = Object.fromEntries(
+    Object.entries(tables).map(([name, table]) => [name, normalizeTable(name, table)])
+  );
   const client = {
     from(tableName) {
       const state = {
@@ -14,10 +17,15 @@ export function createMockSupabaseQuery(tables = {}) {
         payload: null,
       };
       calls.push({ table: tableName, state });
-      return builder(state, tables[tableName] || {});
+      return builder(state, normalizedTables[tableName] || normalizeTable(tableName, {}));
     },
   };
-  return { client, calls };
+  return { client, calls, tables: normalizedTables };
+}
+
+function normalizeTable(name, table) {
+  if (Array.isArray(table)) return { rows: [...table], sequence: 1, name };
+  return { rows: [...(table.rows || [])], sequence: table.sequence || 1, name, ...table };
 }
 
 function builder(state, table) {
@@ -70,20 +78,32 @@ function builder(state, table) {
 
 function resolve(table, state) {
   if (table.error) return { data: null, error: table.error };
-  if (state.operation === "insert") {
-    if (table.insertError) return { data: null, error: table.insertError };
-    return {
-      data: table.insertResult || [{ id: `${state.tableName}-inserted`, ...state.payload }],
-      error: null,
-    };
-  }
-  if (state.operation === "update") {
-    if (table.updateError) return { data: null, error: table.updateError };
-    return {
-      data: table.updateResult || [{ id: state.filters.id, ...state.payload }],
-      error: null,
-    };
-  }
+  if (state.operation === "insert") return insertRow(table, state);
+  if (state.operation === "update") return updateRows(table, state);
+  return { data: selectRows(table, state), error: null };
+}
+
+function insertRow(table, state) {
+  if (table.insertError) return { data: null, error: table.insertError };
+  if (table.insertResult) return { data: table.insertResult, error: null };
+  const payload = Array.isArray(state.payload) ? state.payload[0] : state.payload;
+  const row = { id: `${state.tableName}-${table.sequence++}`, ...payload };
+  table.rows.push(row);
+  return { data: [row], error: null };
+}
+
+function updateRows(table, state) {
+  if (table.updateError) return { data: null, error: table.updateError };
+  if (table.updateResult) return { data: table.updateResult, error: null };
+  const matches = selectRows(table, { ...state, operation: "select" });
+  const updated = matches.map((row) => {
+    Object.assign(row, state.payload);
+    return row;
+  });
+  return { data: updated, error: null };
+}
+
+function selectRows(table, state) {
   let rows = typeof table.rows === "function" ? table.rows(state) : [...(table.rows || [])];
   rows = rows.filter((row) =>
     Object.entries(state.filters).every(([key, value]) => row[key] === value)
@@ -97,7 +117,7 @@ function resolve(table, state) {
     if (options?.ascending === false) rows.reverse();
   }
   if (Number.isFinite(state.limitValue)) rows = rows.slice(0, state.limitValue);
-  return { data: rows, error: null };
+  return rows;
 }
 
 export const mockQueryError = (message) => new Error(message);
