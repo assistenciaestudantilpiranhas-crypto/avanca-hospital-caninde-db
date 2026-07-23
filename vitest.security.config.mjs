@@ -2,14 +2,13 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    environment: "jsdom",
+    environment: "node",
     globals: true,
-    include: ["tests/**/*.test.js"],
-    exclude: ["tests/security/**/*.test.js", "node_modules/**"],
-    setupFiles: ["tests/setup.js"],
+    include: ["tests/security/**/*.test.js"],
     isolate: true,
     clearMocks: true,
     restoreMocks: true,
     mockReset: true,
+    testTimeout: 30000,
   },
 });
