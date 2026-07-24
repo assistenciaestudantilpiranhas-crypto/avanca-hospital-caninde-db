@@ -46,6 +46,39 @@ export function readSecuritySql(relativePath) {
   return readFileSync(new URL(`../security/sql/${relativePath}`, import.meta.url), "utf8");
 }
 
+// execLocalRows: equivalente a queryLocalRows mas para DML (INSERT/UPDATE/DELETE ... RETURNING).
+// Usa "WITH _q AS (...) SELECT json_agg..." para manter o DML no nivel superior da instrucao,
+// evitando o erro "data-modifying statement must be at the top level" do PostgreSQL.
+export function execLocalRows(sql) {
+  assertLocalOnlyStatus();
+  const cleanSql = sql.trim().replace(/;+\s*$/g, "");
+  const wrapped = `with _q as (${cleanSql}) select coalesce(json_agg(row_to_json(_q)), '[]'::json) from _q`;
+  const result = spawnSync(
+    "docker",
+    [
+      "exec",
+      "-i",
+      findLocalDbContainer(),
+      "psql",
+      "-U",
+      "postgres",
+      "-d",
+      "postgres",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-t",
+      "-A",
+      "-c",
+      wrapped,
+    ],
+    { encoding: "utf8" }
+  );
+  if (result.status !== 0) {
+    throw new Error(`Falha ao executar DML local: ${result.stderr || result.stdout}`);
+  }
+  return JSON.parse(result.stdout.trim() || "[]");
+}
+
 export function queryLocalRows(sql) {
   assertLocalOnlyStatus();
   const cleanSql = sql.trim().replace(/;+\s*$/g, "");
