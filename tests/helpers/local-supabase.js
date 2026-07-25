@@ -112,3 +112,94 @@ export function queryLocalRows(sql) {
 export function querySqlFile(relativePath) {
   return queryLocalRows(readSecuritySql(relativePath));
 }
+
+/**
+ * Resolve a chave de servico (admin) do Supabase local.
+ *
+ * Suporta dois formatos de saida do CLI:
+ *   1. `supabase status -o env`  →  KEY="value" (preferido; estavel entre versoes)
+ *   2. `supabase status`         →  JSON {"KEY": "value"} ou human-readable
+ *
+ * Hierarquia de preferencia da chave (ambas funcionam como admin key local):
+ *   SERVICE_ROLE_KEY (JWT)  >  SECRET_KEY (sb_secret_...)
+ *
+ * Mapeamento dos formatos de CLI:
+ *   Formato antigo  →  ANON_KEY / SERVICE_ROLE_KEY
+ *   Formato atual   →  PUBLISHABLE_KEY (anon/public) / SECRET_KEY (admin)
+ *   Ambos coexistem no formato -o env para compatibilidade.
+ *
+ * Protecao local-only: valida API_URL antes de retornar.
+ *
+ * Lanca excecao se nenhuma chave for encontrada — nunca retorna null.
+ * O caller deve tratar a excecao como falha de setup (nao skip).
+ */
+export function resolveLocalServiceKey() {
+  // shell:true + string de comando e necessario no Windows para executar
+  // arquivos .cmd (npx.cmd) — cmd.exe e o unico que pode interpretar batch files.
+  // Em Linux/Mac, shell:true com "npx" tambem funciona corretamente.
+  const shellCmd = process.platform === "win32" ? "npx.cmd" : "npx";
+
+  // Tentativa 1: saida estruturada  supabase status -o env
+  // Formato: KEY="value"  (estavel entre versoes do CLI)
+  const envResult = spawnSync(
+    `${shellCmd} supabase status -o env`,
+    { encoding: "utf8", shell: true, cwd: process.cwd() }
+  );
+  const envText = (envResult.stdout ?? "") + (envResult.stderr ?? "");
+
+  // Valida API_URL local-only (se presente na saida)
+  const apiUrlEnvMatch = envText.match(/^API_URL="?([^"\n\r]+)"?/m);
+  if (apiUrlEnvMatch) {
+    const apiUrl = apiUrlEnvMatch[1].trim();
+    try {
+      const u = new URL(apiUrl);
+      if (!LOCAL_HOST_PATTERN.test(u.hostname))
+        throw new Error(`Recusado: API_URL nao-local detectada: ${apiUrl}`);
+      if (/supabase\.co/i.test(apiUrl))
+        throw new Error(`Recusado: host Cloud detectado em API_URL: ${apiUrl}`);
+    } catch (e) {
+      if (e.message.startsWith("Recusado:")) throw e;
+    }
+  }
+
+  // Extrai KEY="value" ou KEY=value de qualquer linha do output env
+  const parseEnvLine = (text, key) => {
+    const m = text.match(new RegExp(`(?:^|\\r?\\n)${key}="?([^"\\n\\r]+)"?`));
+    return m?.[1]?.trim() ?? null;
+  };
+
+  // SERVICE_ROLE_KEY (JWT — compativel com Auth Admin API como Bearer token)
+  // SECRET_KEY      (sb_secret_... — novo formato do CLI, aceito como apikey)
+  const keyFromEnv =
+    parseEnvLine(envText, "SERVICE_ROLE_KEY") ??
+    parseEnvLine(envText, "SECRET_KEY");
+  if (keyFromEnv) return keyFromEnv;
+
+  // Tentativa 2: saida plain  supabase status  (JSON ou human-readable)
+  const plainResult = spawnSync(
+    `${shellCmd} supabase status`,
+    { encoding: "utf8", shell: true, cwd: process.cwd() }
+  );
+  const plainText = (plainResult.stdout ?? "") + (plainResult.stderr ?? "");
+
+  // JSON: "SERVICE_ROLE_KEY": "eyJ..."
+  let m = plainText.match(/"SERVICE_ROLE_KEY":\s*"([^"]+)"/);
+  if (m) return m[1];
+
+  // JSON: "SECRET_KEY": "sb_secret_..."
+  m = plainText.match(/"SECRET_KEY":\s*"([^"]+)"/);
+  if (m) return m[1];
+
+  // Human-readable CLI antigo: "service_role key: eyJ..."
+  m = plainText.match(/service_role\s+key\s*:\s*(\S+)/i);
+  if (m) return m[1];
+
+  // Human-readable CLI atual: "   Secret: sb_secret_..." ou "Secret key: sb_secret_..."
+  m = plainText.match(/^\s*Secret(?:\s+key)?\s*:\s*(\S+)/im);
+  if (m) return m[1];
+
+  throw new Error(
+    "Chave de servico Supabase local nao encontrada. " +
+      "Verifique: 'npx.cmd supabase status -o env' deve conter SERVICE_ROLE_KEY ou SECRET_KEY."
+  );
+}

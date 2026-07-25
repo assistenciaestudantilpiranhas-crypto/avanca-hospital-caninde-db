@@ -23,13 +23,13 @@
  *   insere seed data em todas as 17 tabelas antes de criar os usuarios.
  */
 
-import { spawnSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   assertLocalOnlyStatus,
   execLocalRows,
   loadLocalSupabaseStatus,
   queryLocalRows,
+  resolveLocalServiceKey,
 } from "../helpers/local-supabase.js";
 
 const LOCAL_API_URL = "http://127.0.0.1:54321";
@@ -42,30 +42,21 @@ let SUITE_SKIP_REASON = null;
 let SERVICE_KEY = null;
 
 try {
-  // assertLocalOnlyStatus(loadLocalSupabaseStatus()) confirma:
-  //   1) Docker com container supabase_db_* existe
-  //   2) todas as URLs sao localhost / 127.0.0.1
+  // Passo 1: confirma que o Supabase local esta acessivel (Docker + URLs locais).
+  // Se falhar aqui, o ambiente nao esta rodando — marca para skip.
   assertLocalOnlyStatus(loadLocalSupabaseStatus());
-
-  // Obtem SERVICE_ROLE_KEY do ambiente local atual (nao usa valor fixo).
-  // spawnSync com shell:true e comando-string evita incompatibilidade
-  // de npx.cmd vs npx entre Windows PowerShell, Git Bash e workers do Vitest.
-  const sr = spawnSync("npx supabase status", {
-    encoding: "utf8",
-    shell: true,
-    cwd: process.cwd(),
-  });
-  const statusText = (sr.stdout ?? "") + (sr.stderr ?? "");
-  // supabase status emite JSON: "SERVICE_ROLE_KEY": "<key>"
-  const keyMatch = statusText.match(/"SERVICE_ROLE_KEY":\s*"([^"]+)"/);
-  SERVICE_KEY = keyMatch?.[1] ?? null;
-
-  if (!SERVICE_KEY) {
-    SUITE_SKIP_REASON =
-      "SERVICE_ROLE_KEY ausente em 'supabase status' — projeto inicializado?";
-  }
 } catch (e) {
   SUITE_SKIP_REASON = `Ambiente Supabase local indisponivel: ${e.message}`;
+}
+
+if (!SUITE_SKIP_REASON) {
+  // Passo 2: resolve a chave de servico dinamicamente (sem valor fixo no repositorio).
+  // Suporta os dois formatos de saida do CLI:
+  //   formato antigo: SERVICE_ROLE_KEY / ANON_KEY
+  //   formato atual:  SECRET_KEY (sb_secret_...) / PUBLISHABLE_KEY (sb_publishable_...)
+  // Se o Supabase esta rodando mas a chave nao e encontrada, lanca excecao
+  // (falha o setup do arquivo — nao marca os testes como skipped).
+  SERVICE_KEY = resolveLocalServiceKey();
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +180,7 @@ function cit(key, name, fn) {
 // Setup e teardown
 // ---------------------------------------------------------------------------
 
-// 13 perfis testados
+// 13 perfis testados + 1 usuario multi-perfil (Farmacia + TEN) para Fase B1
 const profileMap = {
   recepcao:    "Recepção",
   farmacia:    "Farmácia",
@@ -204,6 +195,8 @@ const profileMap = {
   auditoria:   "Auditoria",
   sem_perfil:  null,
   inativo:     "Recepção",
+  // Fase B1: usuario com dois perfis para testar uniao de permissoes
+  multi_far_ten: "Farmácia",
 };
 
 const testUsers = {};
@@ -359,6 +352,17 @@ beforeAll(async () => {
     const jwt = await signIn(email, "GsiTest@2026!");
     testUsers[key] = { id: user.id, email, jwt };
   }
+
+  // Fase B1: adiciona segundo perfil ao usuario multi_far_ten.
+  // Resulta em uniao de permissoes: Farmacia + Tecnico em Enfermagem.
+  // Deve ler pacientes e atendimentos (via TEN), mas nao consultas
+  // (nenhum dos dois perfis recebe consulta.visualizar na Fase B1).
+  execLocalRows(
+    `INSERT INTO public.usuario_perfil (usuario_id, perfil_id)
+     SELECT '${testUsers.multi_far_ten.id}', id
+     FROM public.perfis_acesso WHERE nome = 'Técnico em Enfermagem'
+     RETURNING usuario_id`
+  );
 }, 60_000);
 
 afterAll(async () => {
@@ -517,6 +521,15 @@ describe("fase-a farmacia — prescricoes e estoque, bloqueio de clinico", () =>
 
   cit("farmacia", "farmacia: nao ve transferencias — body vazio", async () => {
     const { status, body } = await selectTable(testUsers.farmacia.jwt, "transferencias");
+    expect(status).toBe(200);
+    expect(Array.isArray(body) && body.length === 0).toBe(true);
+  });
+
+  // Fase B1: Farmacia perde acesso a atendimentos — prescricao.dispensar removida
+  // da policy atendimentos_select_operacional. Farmacia nao precisa listar
+  // atendimentos para dispensar — acessa prescricoes diretamente pelo id.
+  cit("farmacia", "farmacia: nao ve atendimentos — Fase B1 remove acesso desproporcional (body vazio)", async () => {
+    const { status, body } = await selectTable(testUsers.farmacia.jwt, "atendimentos");
     expect(status).toBe(200);
     expect(Array.isArray(body) && body.length === 0).toBe(true);
   });
@@ -713,10 +726,14 @@ describe("fase-a enfermeiro — clinico + transferencia, bloqueio de prescricao 
   });
 });
 
-describe("fase-a tecnico-em-enfermagem — clinico de triagem, sem transferencia nem prescricao", () => {
+describe("fase-b1 tecnico-em-enfermagem — clinico de triagem, sem consultas nem transferencia nem prescricao", () => {
+  // Fase B1: consultas removida de tecAllowed.
+  // TEN tinha acesso nao intencional via observacao.reavaliar (Fase A).
+  // A migration 20260722100031 substitui a policy consultas_select_clinico
+  // por has_permission('consulta.visualizar') — TEN nao recebe essa permissao.
   const tecAllowed = [
     "pacientes", "atendimentos", "chamadas", "triagens",
-    "consultas", "evolucoes_enfermagem", "observacoes", "reavaliacoes_observacao",
+    "evolucoes_enfermagem", "observacoes", "reavaliacoes_observacao",
     "estabilizacoes", "checklist_estabilizacao_itens",
   ];
 
@@ -742,6 +759,17 @@ describe("fase-a tecnico-em-enfermagem — clinico de triagem, sem transferencia
 
   cit("tecnico_enf", "tecnico-em-enfermagem: nao ve exames — body vazio", async () => {
     const { status, body } = await selectTable(testUsers.tecnico_enf.jwt, "exames");
+    expect(status).toBe(200);
+    expect(Array.isArray(body) && body.length === 0).toBe(true);
+  });
+
+  // Fase B1: TEN perde acesso nao intencional a consultas.
+  // Na Fase A, observacao.reavaliar estava na policy consultas_select_clinico,
+  // dando a TEN acesso inadvertido a hipotese_diagnostica, cid, conduta.
+  // A Fase B1 corrige isso: consultas_select_clinico passa a exigir
+  // has_permission('consulta.visualizar'), que TEN nao possui.
+  cit("tecnico_enf", "tecnico-em-enfermagem: nao ve consultas — Fase B1 corrige acesso nao intencional (body vazio)", async () => {
+    const { status, body } = await selectTable(testUsers.tecnico_enf.jwt, "consultas");
     expect(status).toBe(200);
     expect(Array.isArray(body) && body.length === 0).toBe(true);
   });
@@ -797,6 +825,46 @@ describe("fase-a auditoria — leitura completa via is_auditoria()", () => {
     const { status, body } = await selectTable(testUsers.auditoria.jwt, "estoque_movimentacoes");
     expect(status).toBe(200);
     expect(Array.isArray(body)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fase B1 — cenario de multiplos perfis (uniao de permissoes)
+// ---------------------------------------------------------------------------
+
+describe("fase-b1 multiplos-perfis — farmacia + tecnico-em-enfermagem (uniao de permissoes)", () => {
+  // O usuario multi_far_ten tem dois vinculos em usuario_perfil:
+  //   1. Farmacia    -> tem paciente.visualizar
+  //   2. TEN         -> tem paciente.visualizar + atendimento.visualizar
+  //
+  // has_permission() verifica a existencia da chave em QUALQUER perfil ativo do usuario.
+  // Resultado esperado pela uniao:
+  //   paciente.visualizar    = SIM (ambos tem)
+  //   atendimento.visualizar = SIM (TEN tem; Farmacia nao tem)
+  //   consulta.visualizar    = NAO (nenhum dos dois tem)
+
+  cit("multi_far_ten", "multi-perfil farmacia+ten: le pacientes (ambos tem paciente.visualizar, body nao-vazio)", async () => {
+    const { status, body } = await selectTable(testUsers.multi_far_ten.jwt, "pacientes");
+    expect(status).toBe(200);
+    expect(Array.isArray(body) && body.length > 0).toBe(true);
+  });
+
+  cit("multi_far_ten", "multi-perfil farmacia+ten: le atendimentos (TEN tem atendimento.visualizar, body nao-vazio)", async () => {
+    const { status, body } = await selectTable(testUsers.multi_far_ten.jwt, "atendimentos");
+    expect(status).toBe(200);
+    expect(Array.isArray(body) && body.length > 0).toBe(true);
+  });
+
+  cit("multi_far_ten", "multi-perfil farmacia+ten: nao ve consultas — nenhum dos dois perfis tem consulta.visualizar (body vazio)", async () => {
+    const { status, body } = await selectTable(testUsers.multi_far_ten.jwt, "consultas");
+    expect(status).toBe(200);
+    expect(Array.isArray(body) && body.length === 0).toBe(true);
+  });
+
+  cit("multi_far_ten", "multi-perfil farmacia+ten: le prescricoes (Farmacia tem prescricao.dispensar, body nao-vazio)", async () => {
+    const { status, body } = await selectTable(testUsers.multi_far_ten.jwt, "prescricoes");
+    expect(status).toBe(200);
+    expect(Array.isArray(body) && body.length > 0).toBe(true);
   });
 });
 
