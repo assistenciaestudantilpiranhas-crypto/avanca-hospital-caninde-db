@@ -14,3 +14,21 @@ supabase/snippets/
 _audit_export/
 .npm-cache/
 .supabase-home/
+
+# Secrets e configuração local — NUNCA versionar
+.env
+.env.local
+.env.*.local
+*.env
+
+# Dumps e backups de banco — NUNCA versionar
+*.dump
+*.sql.gz
+*.backup
+*.bak
+supabase/seed/prod/
+
+# Arquivos temporários e de sistema
+*.tmp
+Thumbs.db
+.DS_Store
