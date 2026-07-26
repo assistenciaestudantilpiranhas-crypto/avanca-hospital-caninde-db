@@ -1,10 +1,10 @@
 # GSI ONE — Fase 2: Ambiente de Homologação e Usuários Fictícios
 
-**Fase:** 2 — Ambiente de Homologação e Usuários Fictícios  
-**Data de planejamento:** 2026-07-25  
-**Repositório:** avanca-hospital-caninde-db  
-**Commit de referência:** 903519f security: protect repository secrets and document audit  
-**Padrão aplicado:** GHAES — Global Health AI Engineering Standard  
+**Fase:** 2 — Ambiente de Homologação e Usuários Fictícios
+**Data de planejamento:** 2026-07-25
+**Repositório:** avanca-hospital-caninde-db
+**Commit de referência:** 903519f security: protect repository secrets and document audit
+**Padrão aplicado:** GHAES — Global Health AI Engineering Standard
 **Status:** Plano aprovado — aguardando autorização para execução
 
 ---
@@ -1066,5 +1066,5 @@ A Fase 2 é encerrada quando:
 
 ---
 
-*Este documento segue o padrão GHAES — Global Health AI Engineering Standard.*  
+*Este documento segue o padrão GHAES — Global Health AI Engineering Standard.*
 *Referência: https://github.com/erickgomesal/ghaes*
