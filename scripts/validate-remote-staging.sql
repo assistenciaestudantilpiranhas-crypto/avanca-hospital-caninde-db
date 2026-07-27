@@ -198,6 +198,15 @@ SELECT '21_clinical_count_movimentacoes_estoque' AS secao, COUNT(*) AS quantidad
 SELECT '21_clinical_count_audit_log' AS secao, COUNT(*) AS quantidade FROM public.audit_log;
 
 SELECT
+  '21a_audit_log_agregado' AS secao,
+  acao,
+  tabela_afetada,
+  COUNT(*) AS quantidade
+FROM public.audit_log
+GROUP BY acao, tabela_afetada
+ORDER BY tabela_afetada, acao;
+
+SELECT
   '22_bootstrap_administrativo' AS secao,
   EXISTS (
     SELECT 1
@@ -322,6 +331,17 @@ LEFT JOIN public.permissoes p ON p.id = pp.permissao_id
 WHERE pa.id IS NULL
    OR p.id IS NULL
 ORDER BY tipo;
+
+SELECT
+  '27a_perfis_sem_permissoes' AS secao,
+  pa.nome AS perfil,
+  COUNT(pp.permissao_id) AS quantidade_permissoes
+FROM public.perfis_acesso pa
+LEFT JOIN public.perfil_permissao pp
+  ON pp.perfil_id = pa.id
+GROUP BY pa.id, pa.nome
+HAVING COUNT(pp.permissao_id) = 0
+ORDER BY pa.nome;
 
 SELECT
   '28_duplicidade_perfis' AS secao,

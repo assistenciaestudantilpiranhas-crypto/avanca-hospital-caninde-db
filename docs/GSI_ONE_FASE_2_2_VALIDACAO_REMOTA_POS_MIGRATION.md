@@ -6,7 +6,7 @@
 **Projeto remoto:** gsi-one-homologacao
 **Project ref:** vwve...idkxq
 **Padrao aplicado:** GHAES - Global Health AI Engineering Standard
-**Status:** Roteiro criado - execucao manual a validar
+**Status:** Validacao remota consolidada - Fase 2.2 concluida documentalmente
 
 ---
 
@@ -130,12 +130,14 @@ O roteiro manual esta em `scripts/validate-remote-staging.sql` e inclui as secoe
 19. relacao perfil-permissoes;
 20. quantidade de usuarios em `auth.users`;
 21. contagens agregadas de tabelas clinicas;
+21a. agrupamento tecnico do `audit_log` por acao e tabela afetada;
 22. existencia do bootstrap administrativo;
 23. existencia das permissoes B1;
 24. existencia das policies da Fase A;
 25. existencia das policies da Fase B1;
 26. historico de migrations;
 27. consistencia perfil-permissao;
+27a. identificacao nominal de perfis sem permissoes;
 28. duplicidade em perfis;
 29. duplicidade em permissoes;
 30. duplicidade em vinculos perfil-permissao.
@@ -387,22 +389,178 @@ Achados desta preparacao:
 - `stash@{0}` preservado e nao aplicado;
 - contagem local observada de migrations deve ser reconciliada na execucao manual com o estado confirmado da sessao.
 
+### ACHADO F2.2-01 â€” Perfis sem permissÃµes vinculadas
+
+Foram identificados dois perfis oficiais sem permissÃµes associadas:
+
+- GestÃ£o Hospitalar
+- Leitura/Gestor
+
+ClassificaÃ§Ã£o: pendÃªncia funcional controlada.
+
+Impacto atual:
+- nenhum usuÃ¡rio estÃ¡ vinculado a esses perfis no ambiente de homologaÃ§Ã£o;
+- nenhuma permissÃ£o foi concedida;
+- nÃ£o hÃ¡ vÃ­nculo Ã³rfÃ£o;
+- nÃ£o hÃ¡ inconsistÃªncia estrutural na tabela `perfil_permissao`.
+
+Encaminhamento:
+Definir e aprovar a matriz institucional de permissÃµes desses dois perfis antes de criar usuÃ¡rios de homologaÃ§Ã£o ou aplicar qualquer migration corretiva.
+
+### ACHADO F2.2-02 â€” Cobertura de RLS
+
+A consulta de tabelas sem Row Level Security retornou zero registros.
+
+Resultado:
+- todas as tabelas do schema `public` estÃ£o com RLS habilitado;
+- nenhuma tabela pÃºblica ficou sem proteÃ§Ã£o por RLS;
+- nÃ£o foi identificada falha estrutural de cobertura.
+
+ClassificaÃ§Ã£o: conforme.
+
+Impacto:
+- a estrutura remota estÃ¡ protegida por RLS em todas as tabelas pÃºblicas;
+- a efetividade dos acessos ainda depende da revisÃ£o das policies e dos grants.
+
+### ACHADO F2.2-03 - Grants DELETE em tabelas de dominio
+
+Foram identificados grants `DELETE` amplos nas sete tabelas de dominio:
+
+- `dom_classificacao_risco`
+- `dom_desfechos`
+- `dom_status_atendimento`
+- `dom_status_exame`
+- `dom_status_prescricao`
+- `dom_status_transferencia`
+- `dom_tipos_observacao`
+
+Classificacao: risco medio.
+
+Leitura tecnica:
+- o risco e mitigado por RLS habilitado em todas as tabelas publicas;
+- as policies administrativas restringem a operacao por `is_admin()`;
+- nao ha indicio de acesso anonimo direto;
+- a decisao sobre manter ou remover exclusao fisica administrativa em dominios permanece institucionalmente pendente.
+
+Encaminhamento:
+Nao executar alteracao de grant ou policy nesta etapa. A decisao deve ser registrada antes de qualquer migration corretiva.
+
+### ACHADO F2.2-04 - `auth.users` sem registros
+
+A validacao remota retornou zero registros em `auth.users`.
+
+Classificacao: conforme.
+
+Impacto:
+- nenhuma conta ficticia foi criada;
+- nenhuma identidade foi exposta;
+- a etapa permanece anterior ao provisionamento controlado de usuarios.
+
+### ACHADO F2.2-05 - Tabelas clinicas sem dados e `audit_log` com 39 registros
+
+As tabelas clinicas validadas retornaram zero registros:
+
+- `pacientes`
+- `atendimentos`
+- `triagens`
+- `consultas`
+- `evolucoes_enfermagem`
+- `prescricoes`
+- `exames`
+- `transferencias`
+- `estoque_movimentacoes`
+
+A tabela `audit_log` retornou 39 registros.
+
+Classificacao: conforme com observacao tecnica.
+
+Impacto:
+- nenhum dado clinico ou assistencial foi encontrado;
+- nenhum dado real de paciente foi inserido;
+- a existencia de registros em `audit_log` requer leitura tecnica agregada, sem exposicao de usuario ou paciente.
+
+### ACHADO F2.2-06 - Origem tecnica dos 39 registros de `audit_log`
+
+Os 39 registros de `audit_log` foram tratados como origem tecnica da aplicacao das migrations e/ou operacoes estruturais auditadas, sem evidencia de dados clinicos.
+
+Classificacao: conforme com rastreabilidade preservada.
+
+Encaminhamento:
+Manter `audit_log` append-only. Nao limpar, truncar, editar ou remover registros nesta etapa.
+
+### ACHADO F2.2-07 - Permissoes da Fase B1 existentes
+
+Foram confirmadas as tres permissoes especificas de leitura da Fase B1:
+
+- `paciente.visualizar`
+- `atendimento.visualizar`
+- `consulta.visualizar`
+
+Classificacao: conforme.
+
+### ACHADO F2.2-08 - Policies da Fase B1 vinculadas corretamente
+
+Foram confirmadas as tres policies da Fase B1 com as permissoes esperadas:
+
+- `pacientes_select_operacional` com `paciente.visualizar`;
+- `atendimentos_select_operacional` com `atendimento.visualizar`;
+- `consultas_select_clinico` com `consulta.visualizar`.
+
+Classificacao: conforme.
+
+### ACHADO F2.2-09 - Bootstrap administrativo existente
+
+A funcao `bootstrap_primeiro_admin` existe no schema `public`.
+
+Classificacao: conforme.
+
+Impacto:
+- a estrutura de inicializacao administrativa esta presente;
+- nenhuma chamada de bootstrap foi executada nesta etapa.
+
+### ACHADO F2.2-10 - Historico remoto com 32 migrations
+
+O historico remoto confirmou 32 migrations aplicadas, consistente com as 32 migrations locais informadas para esta fase.
+
+Classificacao: conforme.
+
+Impacto:
+- a estrutura remota esta sincronizada com a base local de migrations;
+- nao ha migration pendente identificada nesta consolidacao.
+
+### Conclusao consolidada da Fase 2.2
+
+A Fase 2.2 fica consolidada com os seguintes pontos:
+
+- estrutura remota validada;
+- 32 migrations locais e remotas consistentes;
+- nenhuma tabela `public` sem RLS;
+- nenhum usuario criado;
+- nenhum dado clinico presente;
+- Fase B1 presente e coerente;
+- dois perfis ainda sem matriz de permissoes: Gestao Hospitalar e Leitura/Gestor;
+- decisao pendente sobre exclusao fisica administrativa em tabelas de dominio;
+- usuarios ficticios nao devem ser criados para Gestao Hospitalar ou Leitura/Gestor ate aprovacao da matriz;
+- nenhum ajuste remoto deve ser executado nesta etapa.
 ---
 
 ## 23. Pendencias
 
-- Executar manualmente `scripts/validate-remote-staging.sql` no projeto `gsi-one-homologacao`;
-- registrar os resultados agregados, sem dados sensiveis;
-- reconciliar contagem do historico remoto com o estado esperado;
-- aprovar ou bloquear a criacao de usuarios ficticios somente apos a validacao.
+- Execucao remota ja consolidada nesta fase; nao executar novos ajustes remotos nesta etapa;
+- Manter registrados apenas resultados agregados, sem dados sensiveis;
+- Historico remoto consolidado com 32 migrations;
+- Aprovar ou bloquear a criacao de usuarios ficticios somente apos decisao sobre as pendencias institucionais.
+- Definir a matriz de permissÃµes do perfil GestÃ£o Hospitalar.
+- Definir a matriz de permissÃµes do perfil Leitura/Gestor.
+- NÃ£o criar usuÃ¡rios vinculados a esses perfis atÃ© aprovaÃ§Ã£o institucional.
 
 ---
 
 ## 24. Proxima Etapa
 
-Se a validacao for conforme, a proxima etapa recomendada e preparar a criacao controlada de usuarios ficticios de homologacao, ainda sem dados reais e com credenciais fora do repositorio.
+Como a validacao remota foi consolidada, a proxima etapa recomendada e preparar a criacao controlada de usuarios ficticios de homologacao somente para perfis com matriz aprovada, ainda sem dados reais e com credenciais fora do repositorio.
 
-Se houver falha, pausar a Fase 2.2, registrar o achado, identificar a migration ou objeto afetado e corrigir somente com autorizacao explicita.
+Para Gestao Hospitalar, Leitura/Gestor e grants DELETE em dominios, manter decisao como pendencia institucional. Nao executar ajuste remoto, migration corretiva, grant, policy ou criacao de usuarios nesta etapa.
 
 ---
 
