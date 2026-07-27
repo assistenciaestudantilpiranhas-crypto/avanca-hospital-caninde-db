@@ -1,11 +1,11 @@
 # GSI ONE - Fase 2.2: Validacao Remota Pos-Migration
 
-**Fase:** 2.2 - Validacao remota pos-migration  
-**Data:** 2026-07-27  
-**Repositorio:** avanca-hospital-caninde-db  
-**Projeto remoto:** gsi-one-homologacao  
-**Project ref:** vwve...idkxq  
-**Padrao aplicado:** GHAES - Global Health AI Engineering Standard  
+**Fase:** 2.2 - Validacao remota pos-migration
+**Data:** 2026-07-27
+**Repositorio:** avanca-hospital-caninde-db
+**Projeto remoto:** gsi-one-homologacao
+**Project ref:** vwve...idkxq
+**Padrao aplicado:** GHAES - Global Health AI Engineering Standard
 **Status:** Roteiro criado - execucao manual a validar
 
 ---
