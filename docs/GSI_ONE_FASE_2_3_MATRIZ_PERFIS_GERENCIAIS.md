@@ -1,10 +1,10 @@
 # GSI ONE - Fase 2.3: Matriz de Perfis Gerenciais
 
-**Fase:** 2.3 - Definição institucional dos perfis gerenciais  
-**Data:** 2026-07-27  
-**Repositório:** avanca-hospital-caninde-db  
-**Projeto remoto:** gsi-one-homologacao  
-**Padrão aplicado:** GHAES - Global Health AI Engineering Standard  
+**Fase:** 2.3 - Definição institucional dos perfis gerenciais
+**Data:** 2026-07-27
+**Repositório:** avanca-hospital-caninde-db
+**Projeto remoto:** gsi-one-homologacao
+**Padrão aplicado:** GHAES - Global Health AI Engineering Standard
 **Status:** Documento institucional de decisão - sem migration, sem alteração de banco e sem criação de usuários
 
 ---
