@@ -1,11 +1,11 @@
-# GSI ONE - Fase 2.5: Implementação Local das Permissões Gerenciais
+# GSI ONE - Fase 2.5: Implementação e Validação Remota das Permissões Gerenciais
 
-**Fase:** 2.5 - Implementação local das permissões gerenciais
+**Fase:** 2.5 - Implementação local e validação remota das permissões gerenciais
 **Data:** 2026-07-28
 **Repositório:** avanca-hospital-caninde-db
 **Projeto remoto:** gsi-one-homologacao
 **Padrão aplicado:** GHAES - Global Health AI Engineering Standard
-**Status:** Implementação local concluída — sem aplicação remota, sem commit, sem push
+**Status:** CONCLUÍDA — migration aplicada e validada em homologação; commit versionado
 
 ---
 
@@ -21,15 +21,15 @@ A Fase 2.5 criou os seguintes arquivos:
 | `supabase/rollback/20260728000001_create_gestao_permissions_rollback.sql` | Rollback correspondente |
 | `tests/security/gestao-permissions.test.js` | Testes automatizados de segurança |
 
-Estado confirmado no momento da implementação:
+Estado confirmado no momento da implementação local:
 
 | Item | Estado |
 | --- | --- |
 | Ambiente | computador do trabalho |
 | Branch | `main` limpa |
 | Commit base | `a977e78 docs: approve and specify managerial permissions` |
-| Projeto remoto | `gsi-one-homologacao` com 32 migrations aplicadas |
-| Alteração remota | Nenhuma nesta fase |
+| Projeto remoto | `gsi-one-homologacao` com 32 migrations aplicadas antes desta fase |
+| Alteração remota | Nenhuma durante a implementação local |
 | Usuários fictícios | Nenhum criado |
 
 ---
@@ -205,24 +205,90 @@ Pré-condição: banco local ativo com migration 20260728000001 aplicada.
 
 ---
 
-## 5. O que esta fase NÃO faz
+## 5. Aplicação e validação remota em homologação
+
+### 5.1 Autorização e aplicação
+
+A aplicação remota foi autorizada pelo responsável institucional após validação local completa.
+
+| Item | Registro |
+| --- | --- |
+| Data de aplicação | 2026-07-28 |
+| Projeto remoto | `gsi-one-homologacao` (project ref mascarado) |
+| Migration aplicada | `20260728000001_create_gestao_permissions.sql` |
+| Commit de versionamento | `c18e030 security: add managerial profile permissions` |
+
+### 5.2 Resultado do migration list
+
+Após a aplicação remota, o alinhamento entre migrations locais e remotas foi confirmado:
+
+| Contagem | Local | Remota |
+| --- | --- | --- |
+| Migrations totais | 33 | 33 |
+| Alinhamento | Completo | Completo |
+
+A migration `20260728000001_create_gestao_permissions.sql` é a 33ª de ambos os lados.
+
+### 5.3 Resultado da consulta remota perfil × permissão
+
+A consulta executada no ambiente remoto confirmou os seguintes vínculos:
+
+#### Perfil Gestão Hospitalar — 10 permissões
+
+| Permissão confirmada remotamente |
+| --- |
+| `gestao.auditoria_agregada.visualizar` |
+| `gestao.exportar_agregado` |
+| `gestao.fluxos.visualizar` |
+| `gestao.indicadores.visualizar` |
+| `gestao.ocupacao.visualizar` |
+| `gestao.producao.visualizar` |
+| `gestao.relatorios.visualizar` |
+| `gestao.setores.visualizar` |
+| `gestao.tempos.visualizar` |
+| `gestao.usuarios.visualizar` |
+
+#### Perfil Leitura/Gestor — 3 permissões
+
+| Permissão confirmada remotamente |
+| --- |
+| `leitura.indicadores.visualizar` |
+| `leitura.paineis.visualizar` |
+| `leitura.relatorios.visualizar` |
+
+### 5.4 Confirmações de segurança — validação remota
+
+| Item | Resultado |
+| --- | --- |
+| `paciente.visualizar` vinculada a Gestão Hospitalar ou Leitura/Gestor | **Não** — ausente |
+| `atendimento.visualizar` vinculada a Gestão Hospitalar ou Leitura/Gestor | **Não** — ausente |
+| `consulta.visualizar` vinculada a Gestão Hospitalar ou Leitura/Gestor | **Não** — ausente |
+| Usuários fictícios criados | **Não** — nenhum |
+| RLS alterada | **Não** — nenhuma policy modificada |
+| Policies de acesso alteradas | **Não** — nenhuma |
+| Dados clínicos alterados | **Não** — nenhum dado clínico presente ou modificado |
+| Grants alterados | **Não** — nenhum |
+| Migrations anteriores alteradas | **Não** — nenhuma |
+
+---
+
+## 6. O que esta fase NÃO faz
 
 Esta fase deliberadamente não inclui:
 
 | Item | Razão |
 | --- | --- |
-| Views agregadas | Fase posterior após validação dos vínculos |
-| Policies de RLS para as views | Depende das views |
-| Grants para tabelas gerenciais | Depende das views e policies |
-| Aplicação no ambiente remoto | Requer autorização expressa e validação local prévia |
-| Criação de usuários fictícios de teste | Requer autorização expressa pós-validação |
+| Views agregadas | Fase 2.6 — após especificação e autorização |
+| Policies de RLS para as views | Fase 2.6 — depende das views |
+| Grants para tabelas gerenciais | Fase 2.6 — depende das views e policies |
+| Criação de usuários fictícios de teste | Requer autorização expressa pós-validação das views |
 | Permissões pendentes (`gestao.dados_nominais`, `gestao.auditoria` integral) | Aguardam decisão institucional |
 | Alteração de migrations anteriores | Proibida |
 | Alteração de RLS existente | Proibida nesta fase |
 
 ---
 
-## 6. Impacto de acesso efetivo
+## 7. Impacto de acesso efetivo
 
 As permissões criadas nesta fase **não concedem acesso efetivo a dados** porque:
 
@@ -235,20 +301,20 @@ O impacto real de acesso ocorrerá na Fase 2.6, quando as views e policies forem
 
 ---
 
-## 7. Impacto em RLS nesta fase
+## 8. Impacto em RLS nesta fase
 
 | Área | Impacto |
 | --- | --- |
 | Tabelas clínicas | Nenhum — policies não alteradas |
 | Tabelas de domínio | Nenhum |
 | `audit_log` | Nenhum |
-| `perfis_acesso` | Apenas inserção dos dois perfis gerenciais (sem RLS alterada) |
-| `permissoes` | Apenas inserção das 13 novas permissões (sem RLS alterada) |
-| `perfil_permissao` | Apenas inserção dos vínculos (sem RLS alterada) |
+| `perfis_acesso` | Nenhum — perfis preexistiam; migration não os criou nem alterou |
+| `permissoes` | Inserção das 13 novas permissões gerenciais (sem RLS alterada) |
+| `perfil_permissao` | Inserção dos 13 vínculos (sem RLS alterada) |
 
 ---
 
-## 8. Decisões pendentes remanescentes
+## 9. Decisões pendentes remanescentes
 
 | Ref. | Pendência | Impacto |
 | --- | --- | --- |
@@ -261,7 +327,7 @@ O impacto real de acesso ocorrerá na Fase 2.6, quando as views e policies forem
 
 ---
 
-## 9. Riscos técnicos residuais
+## 10. Riscos técnicos residuais
 
 | Risco | Probabilidade | Impacto | Mitigação |
 | --- | --- | --- | --- |
@@ -272,7 +338,31 @@ O impacto real de acesso ocorrerá na Fase 2.6, quando as views e policies forem
 
 ---
 
-## 10. Próxima etapa habilitada — Fase 2.6
+## 11. Conclusão formal da Fase 2.5
+
+A Fase 2.5 está formalmente concluída.
+
+| Critério de conclusão | Resultado |
+| --- | --- |
+| Migration criada e revisada | Concluído |
+| Rollback criado e validado | Concluído |
+| Testes automatizados criados e aprovados | 34/34 aprovados |
+| Suíte padrão sem regressões | 228/228 aprovados |
+| Migration aplicada localmente | Concluído |
+| Idempotência verificada | Concluído |
+| Rollback testado e revertido corretamente | Concluído |
+| Versionamento em commit | `c18e030 security: add managerial profile permissions` |
+| Aplicação remota autorizada e executada | Concluído — 2026-07-28 |
+| Validação remota perfil × permissão | Concluído — 13 vínculos confirmados |
+| Ausência de permissões clínicas proibidas | Confirmado remotamente |
+| Nenhum perfil criado pela migration | Confirmado |
+| Nenhum RLS ou policy alterado | Confirmado |
+| Nenhum dado clínico alterado | Confirmado |
+| Nenhum usuário fictício criado | Confirmado |
+
+---
+
+## 12. Próxima etapa habilitada — Fase 2.6
 
 Com a Fase 2.5 concluída, a Fase 2.6 poderá:
 
@@ -283,11 +373,11 @@ Com a Fase 2.5 concluída, a Fase 2.6 poderá:
 5. Executar a suíte completa de segurança pós-views.
 6. Propor aplicação no ambiente remoto após validação local completa.
 
-A Fase 2.6 requer autorização expressa antes de qualquer alteração em RLS, policies ou grants.
+**Ponto de parada obrigatório:** nenhuma view, policy ou grant deve ser criado sem especificação técnica prévia e autorização institucional expressa. A Fase 2.6 não deve ser iniciada sem esses dois pré-requisitos.
 
 ---
 
-## 11. Comandos de validação local
+## 13. Comandos de validação local
 
 ```
 -- Verificar permissoes gerenciais criadas
@@ -325,11 +415,14 @@ WHERE pa.nome IN ('Gestão Hospitalar', 'Leitura/Gestor')
 
 ---
 
-## 12. Histórico da fase
+## 14. Histórico da fase
 
 | Etapa | Data | Resultado |
 | --- | --- | --- |
 | Fase 2.3 — Matriz preliminar | 2026-07-27 | Aprovada |
 | Fase 2.4 — Aprovação definitiva e especificação técnica | 2026-07-28 | Aprovada |
-| Fase 2.5 — Implementação local | 2026-07-28 | Migration, rollback e testes criados localmente |
-| Fase 2.6 — Views, policies e validação integrada | Pendente | Aguarda autorização |
+| Fase 2.5 — Implementação local | 2026-07-28 | Migration, rollback e testes criados e validados localmente |
+| Fase 2.5 — Revisão e correção (sem criação de perfis) | 2026-07-28 | Migration corrigida; 34/34 testes aprovados; 228/228 sem regressão |
+| Fase 2.5 — Aplicação remota em homologação | 2026-07-28 | 33 migrations locais e 33 remotas; 13 vínculos confirmados; commit `c18e030` |
+| Fase 2.5 — Conclusão formal | 2026-07-28 | **CONCLUÍDA** |
+| Fase 2.6 — Views, policies e validação integrada | Pendente | Aguarda especificação técnica e autorização expressa |
