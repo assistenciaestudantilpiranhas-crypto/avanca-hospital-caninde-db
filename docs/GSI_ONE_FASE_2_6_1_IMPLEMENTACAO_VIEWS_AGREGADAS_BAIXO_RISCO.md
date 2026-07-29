@@ -1,19 +1,23 @@
-# GSI ONE - Fase 2.6.1: Implementação Local — Views Agregadas de Baixo Risco
+# GSI ONE - Fase 2.6.1: Implementação Concluída — Views Agregadas de Baixo Risco
 
-**Fase:** 2.6.1 - Implementação local das views gerenciais de baixo risco
+**Fase:** 2.6.1 - Implementação e validação em homologação das views gerenciais de baixo risco
 **Data:** 2026-07-28
+**Data da aplicação remota:** 2026-07-28
 **Repositório:** avanca-hospital-caninde-db
-**Projeto remoto:** gsi-one-homologacao
+**Projeto remoto validado:** gsi-one-homologacao (`project ref` mascarado)
 **Padrão aplicado:** GHAES - Global Health AI Engineering Standard
-**Status:** Implementação local — sem aplicação remota autorizada
+**Status:** Concluída documentalmente após aplicação remota autorizada e validação em homologação
 
 ---
 
 ## 1. Contexto
 
-Esta fase implementa localmente as três primeiras views gerenciais, conforme a ordem de risco crescente definida na Fase 2.6 (especificação).
+Esta fase implementa e valida em homologação as três primeiras views gerenciais, conforme a ordem de risco crescente definida na Fase 2.6 (especificação).
 
 As permissões gerenciais (`gestao.*` e `leitura.*`) existem desde a Fase 2.5, mas não concediam acesso efetivo sem views e controles correspondentes. Esta fase cria as views de menor risco e estabelece o padrão técnico que será seguido nas demais.
+
+Após autorização expressa, a migration foi aplicada no projeto remoto de homologação `gsi-one-homologacao`, com `project ref` mantido mascarado nesta documentação para evitar exposição desnecessária de identificador operacional.
+
 
 ---
 
@@ -162,7 +166,7 @@ Este padrão é equivalente a uma policy de RLS inline na view:
 | Dados individuais expostos | Nenhum (dependendo da query) | Nenhum (view retorna apenas agregados) |
 | Auditável | Sim (pg_policies) | Sim (definição da view em pg_views) |
 
-A diferença é que RLS protege a tabela; o `WHERE` inline protege a view. Como a view só retorna agregados (nunca linhas individuais), o risco residual é mínimo.
+A diferença é que RLS protege a tabela; o `WHERE` inline protege a view. Como a view só retorna agregados (nunca linhas individuais), o risco residual é baixo e mitigado na arquitetura atual.
 
 ### 4.4 Justificativa formal registrada
 
@@ -180,6 +184,22 @@ A diferença é que RLS protege a tabela; o `WHERE` inline protege a view. Como 
 | `vw_gestao_indicadores_gerais` | `anon` | `SELECT` | `REVOKE` explícito |
 | `vw_gestao_producao_assistencial` | `anon` | `SELECT` | `REVOKE` explícito |
 | `vw_gestao_tempos_assistenciais` | `anon` | `SELECT` | `REVOKE` explícito |
+
+Validação remota final em homologação:
+
+| View | Owner | `authenticated` | `anon` | `PUBLIC` |
+| --- | --- | --- | --- | --- |
+| `vw_gestao_indicadores_gerais` | `postgres` | `SELECT` | Sem privilégios | Sem privilégios |
+| `vw_gestao_producao_assistencial` | `postgres` | `SELECT` | Sem privilégios | Sem privilégios |
+| `vw_gestao_tempos_assistenciais` | `postgres` | `SELECT` | Sem privilégios | Sem privilégios |
+
+Consulta consolidada de privilégios retornou exatamente:
+
+| table_name | grantee | privilege_type |
+| --- | --- | --- |
+| `vw_gestao_indicadores_gerais` | `authenticated` | `SELECT` |
+| `vw_gestao_producao_assistencial` | `authenticated` | `SELECT` |
+| `vw_gestao_tempos_assistenciais` | `authenticated` | `SELECT` |
 
 ---
 
@@ -199,6 +219,9 @@ A diferença é que RLS protege a tabela; o `WHERE` inline protege a view. Como 
 | `pg_policies` (atendimentos) | Inalterada |
 | `pg_policies` (consultas) | Inalterada |
 
+Não houve grants novos em tabelas clínicas. Não houve alteração em policies clínicas. Não houve alteração em dados clínicos.
+
+
 ---
 
 ## 7. Supressão de célula pequena — estratégia adotada
@@ -215,9 +238,9 @@ A diferença é que RLS protege a tabela; o `WHERE` inline protege a view. Como 
 
 ---
 
-## 8. Validação local obrigatória
+## 8. Validação executada
 
-### 8.1 Aplicar a migration
+### 8.1 Aplicar a migration localmente
 
 ```bash
 docker exec -i supabase_db_avanca-hospital-caninde-db psql -U postgres -d postgres \
@@ -236,11 +259,15 @@ npx.cmd vitest run --config vitest.security.config.mjs tests/security/management
 npx.cmd vitest run --config vitest.security.config.mjs
 ```
 
+Resultado registrado: testes isolados da fase aprovados. A suíte de segurança apresentou falha ambiental pré-existente de coleta em `phase-a-select-access.test.js`; não foi atribuída regressão à Fase 2.6.1.
+
 ### 8.4 Executar a suíte padrão (verificar ausência de regressão)
 
 ```bash
 npx.cmd vitest run
 ```
+
+Resultado registrado: suíte padrão aprovada.
 
 ### 8.5 Testar o rollback
 
@@ -295,6 +322,23 @@ where schemaname = 'public'
 order by tablename, policyname;
 ```
 
+### 8.10 Aplicação e validação remota em homologação
+
+Aplicação remota autorizada e executada no projeto `gsi-one-homologacao` (`project ref` mascarado).
+
+| Item | Resultado |
+| --- | --- |
+| Migration aplicada | `20260728000002_create_low_risk_management_views.sql` |
+| Migration list local | 34 migrations |
+| Migration list remota | 34 migrations |
+| Views existentes em `public` | `vw_gestao_indicadores_gerais`, `vw_gestao_producao_assistencial`, `vw_gestao_tempos_assistenciais` |
+| Owner das views | `postgres` nas três views |
+| Grants finais | `authenticated` somente `SELECT`; `anon` sem privilégios; `PUBLIC` sem privilégios |
+| Grants novos em tabelas clínicas | Nenhum |
+| Policies clínicas alteradas | Nenhuma |
+| Usuários fictícios criados | Nenhum |
+| Dados clínicos alterados | Nenhum |
+
 ---
 
 ## 9. Testes não cobertos nesta fase (requerem usuários fictícios)
@@ -325,7 +369,7 @@ Os testes de acesso autenticado via PostgREST (itens 12-15 do plano de testes da
 
 | Ref. | Decisão |
 | --- | --- |
-| DP-01 | Criação de usuários fictícios para testes autenticados (Fase 2.6.2) |
+| DP-01 | Criação controlada de usuários fictícios e testes autenticados em homologação (Fase 2.6.2) |
 | DP-02 | Implementação das views de ocupação e fluxos (risco médio — Fase 2.6.3) |
 | DP-03 | Implementação da view de usuários/perfis (requer aprovação específica) |
 | DP-04 | Implementação da view de auditoria agregada (requer aprovação específica) |
@@ -334,7 +378,34 @@ Os testes de acesso autenticado via PostgREST (itens 12-15 do plano de testes da
 
 ---
 
-## 12. Referências
+## 12. Conclusão formal da Fase 2.6.1
+
+A Fase 2.6.1 está formalmente concluída após aplicação remota autorizada e validação em homologação.
+
+Escopo confirmado:
+
+- migration `20260728000002_create_low_risk_management_views.sql` aplicada em homologação;
+- 34 migrations locais e 34 migrations remotas;
+- três views agregadas existentes no schema `public`;
+- owner `postgres` nas três views;
+- grants finais restritos a `authenticated` com `SELECT`;
+- `anon` e `PUBLIC` sem privilégios nas views;
+- nenhum grant novo em tabelas clínicas;
+- nenhuma policy clínica alterada;
+- nenhum usuário fictício criado;
+- nenhum dado clínico alterado;
+- nenhuma alteração de frontend;
+- nenhuma alteração em tabelas clínicas.
+
+O risco da fase permanece classificado como baixo e mitigado na arquitetura atual, considerando agregação, supressão de baixo volume, ausência de campos nominais e grants restritos.
+
+Próxima etapa: Fase 2.6.2 — criação controlada de usuários fictícios e testes autenticados em homologação.
+
+Ponto de parada: nenhum usuário deve ser criado sem plano, credenciais fictícias controladas, matriz de perfis e autorização expressa.
+
+---
+
+## 13. Referências
 
 - `docs/GSI_ONE_FASE_2_6_ESPECIFICACAO_VIEWS_GERENCIAIS.md`
 - `docs/GSI_ONE_FASE_2_6_MATRIZ_DADOS_AGREGADOS_E_ANONIMIZADOS.md`
