@@ -1,11 +1,11 @@
 # Documento Mestre do Fluxo Assistencial do Paciente
 
-Este documento define a regra funcional de referência para o fluxo assistencial do paciente no protótipo GSI Saúde. Antes de qualquer alteração em fluxo assistencial, status do paciente, tempos, indicadores, consulta, triagem, observação, sala de estabilização, transferência, enfermagem, farmácia, exames ou desfechos, este documento deve ser lido obrigatoriamente.
+Este documento define a regra funcional de referência para o fluxo assistencial do paciente no GSI ONE / Avança Hospital. Antes de qualquer alteração em fluxo assistencial, status do paciente, tempos, indicadores, consulta, triagem, observação, sala de estabilização, transferência, enfermagem, farmácia, exames ou desfechos, este documento deve ser lido obrigatoriamente.
 
 ## Princípios
 
-- O sistema é um protótipo visual, sem backend real e sem banco de dados real.
-- Todos os dados são fictícios e persistidos em `localStorage` por meio de `GsiApi`.
+- O fluxo assistencial e sua persistência devem estar alinhados à camada de banco PostgreSQL/Supabase do GSI ONE / Avança Hospital.
+- Registros assistenciais devem preservar rastreabilidade, segurança, auditoria e coerência com as migrations, políticas RLS, autenticação, perfis e permissões vigentes.
 - Nenhuma mudança deve criar dados reais de pacientes, CNES, CPF, CNS, indicadores oficiais ou informações institucionais não validadas.
 - O fluxo assistencial deve preservar rastreabilidade: entrada, triagem, classificação, consulta, observação, estabilização, exames, medicação, transferência e desfecho.
 - Status de paciente e tempos assistenciais só devem mudar por ação funcional explícita do usuário ou regra já existente no fluxo.
@@ -433,5 +433,5 @@ Antes de alterar qualquer trecho relacionado a fluxo assistencial, status do pac
 2. Identificar quais status e horários serão afetados.
 3. Confirmar se a alteração muda fluxo assistencial ou apenas apresentação visual.
 4. Fazer a menor mudança possível.
-5. Preservar dados fictícios e compatibilidade com publicação estática.
+5. Preservar segurança, rastreabilidade, auditabilidade e coerência com a camada PostgreSQL/Supabase.
 6. Testar o caminho funcional afetado.
