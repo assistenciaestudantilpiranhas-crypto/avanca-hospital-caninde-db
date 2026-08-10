@@ -325,20 +325,13 @@ beforeAll(async () => {
      VALUES ('${transferenciaId}', 'Checklist seed', false) RETURNING id`
   );
 
-  // estoque_itens (sem movimentacao)
-  // Nao inserimos estoque_movimentacoes porque o trigger fn_block_update_delete
-  // impede DELETE/UPDATE incondicionalmente — nao existe estrategia de limpeza
-  // sem alterar a definicao do trigger. O teste de estoque_movimentacoes verifica
-  // apenas o GRANT SELECT (status 200) sem exigir dados pre-existentes.
-  // O estoque_item (sem movimentacoes) pode ser deletado fisicamente pelo postgres
-  // superuser via psql porque a migration 20260709170000 nao protege estoque_itens
-  // com trigger de bloqueio de DELETE — apenas estoque_movimentacoes e' protegido.
-  const [{ id: estoqueItemId }] = execLocalRows(
-    `INSERT INTO public.estoque_itens (nome, quantidade_atual, quantidade_minima)
-     VALUES ('Item estoque seed Fase-A', 10, 1) RETURNING id`
-  );
+  // estoque_itens: nenhum seed inserido.
+  // PP3-B.3 (20260809000002) proibe DELETE fisico via trigger (trg_block_delete_estoque_itens),
+  // impossibilitando cleanup sem bypass de segurança. Testes de acesso a estoque_itens
+  // verificam apenas GRANT + policy via status HTTP (sem exigir body nao-vazio),
+  // mesmo padrao ja usado para estoque_movimentacoes nesta suíte.
 
-  seedIds = { paciente_id: pacienteId, estoque_item_id: estoqueItemId };
+  seedIds = { paciente_id: pacienteId };
 
   // -------------------------------------------------------------------------
   // 2. Cria usuarios de teste — qualquer falha aqui e FATAL (nao silenciada)
@@ -385,17 +378,7 @@ afterAll(async () => {
       );
     } catch {}
   }
-  // DELETE fisico de estoque_itens como postgres superuser.
-  // Sem estoque_movimentacoes vinculado, nao ha CASCADE bloqueado pelo trigger.
-  // O trigger fn_block_update_delete protege apenas estoque_movimentacoes, nao estoque_itens.
-  // execLocalRows roda como postgres (superuser) via docker psql — ignora restricoes de GRANT.
-  if (seedIds?.estoque_item_id) {
-    try {
-      execLocalRows(
-        `DELETE FROM public.estoque_itens WHERE id = '${seedIds.estoque_item_id}' RETURNING id`
-      );
-    } catch {}
-  }
+  // Nenhum seed de estoque_itens: cleanup desnecessario.
 });
 
 // ---------------------------------------------------------------------------
@@ -477,10 +460,13 @@ describe("fase-a farmacia — prescricoes e estoque, bloqueio de clinico", () =>
     expect(Array.isArray(body) && body.length > 0).toBe(true);
   });
 
-  cit("farmacia", "farmacia: le estoque_itens (body nao-vazio)", async () => {
+  cit("farmacia", "farmacia: le estoque_itens (status 200, GRANT e policy confirmados)", async () => {
+    // Nao e' possivel inserir seed removivel em estoque_itens: PP3-B.3 bloqueia DELETE fisico
+    // via trigger. Verifica apenas que GRANT SELECT e policy estoque_itens_select_operacional
+    // permitem acesso (status 200), mesmo padrao de estoque_movimentacoes nesta suíte.
     const { status, body } = await selectTable(testUsers.farmacia.jwt, "estoque_itens");
     expect(status).toBe(200);
-    expect(Array.isArray(body) && body.length > 0).toBe(true);
+    expect(Array.isArray(body)).toBe(true);
   });
 
   cit("farmacia", "farmacia: le estoque_movimentacoes (status 200, GRANT e policy confirmados)", async () => {
@@ -776,16 +762,14 @@ describe("fase-b1 tecnico-em-enfermagem — clinico de triagem, sem consultas ne
 });
 
 describe("fase-a administracao — leitura completa via is_admin()", () => {
-  // estoque_movimentacoes excluida do loop "body nao-vazio": a tabela e' imutavel
-  // por trigger (fn_block_update_delete) — nao e' possivel inserir seed que possa
-  // ser removido sem alterar o trigger. A policy SELECT e o GRANT sao verificados
-  // em teste dedicado (status 200). Todas as outras tabelas possuem seed presente.
+  // estoque_movimentacoes e estoque_itens excluidas do loop "body nao-vazio":
+  // ambas possuem triggers que impedem DELETE fisico (PP3-B.3), impossibilitando
+  // cleanup do seed. A policy SELECT e o GRANT sao verificados em testes dedicados.
   const tablesWithSeed = [
     "pacientes", "atendimentos", "chamadas", "triagens", "consultas",
     "evolucoes_enfermagem", "observacoes", "reavaliacoes_observacao",
     "estabilizacoes", "checklist_estabilizacao_itens", "prescricoes",
     "prescricao_itens", "exames", "transferencias", "checklist_transferencia_itens",
-    "estoque_itens",
   ];
 
   for (const table of tablesWithSeed) {
@@ -796,6 +780,12 @@ describe("fase-a administracao — leitura completa via is_admin()", () => {
     });
   }
 
+  cit("admin", "admin: le estoque_itens (status 200, GRANT e is_admin confirmados)", async () => {
+    const { status, body } = await selectTable(testUsers.admin.jwt, "estoque_itens");
+    expect(status).toBe(200);
+    expect(Array.isArray(body)).toBe(true);
+  });
+
   cit("admin", "admin: le estoque_movimentacoes (status 200, GRANT e policy confirmados)", async () => {
     const { status, body } = await selectTable(testUsers.admin.jwt, "estoque_movimentacoes");
     expect(status).toBe(200);
@@ -804,13 +794,12 @@ describe("fase-a administracao — leitura completa via is_admin()", () => {
 });
 
 describe("fase-a auditoria — leitura completa via is_auditoria()", () => {
-  // Mesmo criterio de admin: estoque_movimentacoes verificada so por status 200.
+  // Mesmo criterio de admin: estoque_itens e estoque_movimentacoes verificadas por status 200.
   const tablesWithSeed = [
     "pacientes", "atendimentos", "chamadas", "triagens", "consultas",
     "evolucoes_enfermagem", "observacoes", "reavaliacoes_observacao",
     "estabilizacoes", "checklist_estabilizacao_itens", "prescricoes",
     "prescricao_itens", "exames", "transferencias", "checklist_transferencia_itens",
-    "estoque_itens",
   ];
 
   for (const table of tablesWithSeed) {
@@ -820,6 +809,12 @@ describe("fase-a auditoria — leitura completa via is_auditoria()", () => {
       expect(Array.isArray(body) && body.length > 0).toBe(true);
     });
   }
+
+  cit("auditoria", "auditoria: le estoque_itens (status 200, GRANT e is_auditoria confirmados)", async () => {
+    const { status, body } = await selectTable(testUsers.auditoria.jwt, "estoque_itens");
+    expect(status).toBe(200);
+    expect(Array.isArray(body)).toBe(true);
+  });
 
   cit("auditoria", "auditoria: le estoque_movimentacoes (status 200, GRANT e policy confirmados)", async () => {
     const { status, body } = await selectTable(testUsers.auditoria.jwt, "estoque_movimentacoes");

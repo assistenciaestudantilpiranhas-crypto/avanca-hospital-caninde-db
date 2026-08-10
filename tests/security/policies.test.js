@@ -29,7 +29,9 @@ const phaseASelectPolicies = [
   { table: "exames",                       policy: "exames_select_diagnostico" },
   { table: "transferencias",               policy: "transferencias_select_operacional" },
   { table: "checklist_transferencia_itens", policy: "checklist_transferencia_itens_select_operacional" },
-  { table: "estoque_itens",               policy: "estoque_itens_select_farmacia" },
+  // PP3-B.3 (20260809000002): estoque_itens_select_farmacia substituida por
+  // estoque_itens_select_operacional (has_permission + ativo = true).
+  { table: "estoque_itens",               policy: "estoque_itens_select_operacional" },
   { table: "estoque_movimentacoes",        policy: "estoque_movimentacoes_select_farmacia" },
 ];
 
@@ -278,7 +280,10 @@ describe("invariantes de escrita — nao alterados pela Fase A", () => {
 
   it("policy de escrita em estoque preservada", () => {
     const names = new Set(policies().map((row) => row.policyname));
-    expect(names.has("estoque_itens_write_farmacia_admin")).toBe(true);
+    // PP3-B.3 (20260809000002): estoque_itens_write_farmacia_admin foi substituida por
+    // estoque_itens_insert_cadastro + estoque_itens_update_cadastro (has_permission('estoque.cadastrar')).
+    expect(names.has("estoque_itens_insert_cadastro")).toBe(true);
+    expect(names.has("estoque_itens_update_cadastro")).toBe(true);
     expect(names.has("estoque_movimentacoes_insert_farmacia_admin")).toBe(true);
   });
 });

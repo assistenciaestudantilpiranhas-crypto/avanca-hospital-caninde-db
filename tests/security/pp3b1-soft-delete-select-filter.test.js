@@ -90,6 +90,22 @@ const CLASS_B_LINKED_TABLES = [
   { table: "paciente_alertas_clinicos",        policy: null },
 ];
 
+/**
+ * Tabelas tratadas por migrations POSTERIORES ao PP3-B.1.
+ * Nao fazem parte do escopo historico da migration 20260807000001.
+ * Listadas aqui apenas para que a checagem de "tabela inesperada"
+ * nao produza falso-positivo apos essas migrations serem aplicadas.
+ *
+ * PP3-B.2 (20260809000001): adicionou policies SELECT com deleted_at IS NULL
+ * para tabelas de dados clinicos vinculados ao paciente.
+ */
+const PP3B2_TABLES = [
+  { table: "paciente_alergias" },
+  { table: "paciente_comorbidades" },
+  { table: "paciente_medicamentos_continuos" },
+  { table: "paciente_alertas_clinicos" },
+];
+
 // ---------------------------------------------------------------------------
 // Suite 1: Existencia das 12 policies SELECT
 // ---------------------------------------------------------------------------
@@ -295,10 +311,14 @@ describe("pp3b1: campo deleted_at existe nas 12 tabelas (pre-condicao da migrati
   });
 
   cit("nenhuma tabela Classe B inesperada foi incluida na migration", async () => {
-    // Busca policies SELECT com deleted_at IS NULL excluindo A e B1 conhecidas
+    // Busca policies SELECT com deleted_at IS NULL excluindo:
+    // - Classe A (PP2-F): pacientes, atendimentos, consultas
+    // - Classe B (PP3-B.1): 12 tabelas operacionais/clinicas
+    // - PP3-B.2: 4 tabelas clinicas de paciente tratadas por migration posterior
     const knownTables = [
       ...CLASS_A_TABLES.map((e) => e.table),
       ...CLASS_B_TABLES.map((e) => e.table),
+      ...PP3B2_TABLES.map((e) => e.table),
     ].map((t) => `'${t}'`).join(", ");
 
     const rows = queryLocalRows(`
