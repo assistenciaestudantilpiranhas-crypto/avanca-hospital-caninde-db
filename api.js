@@ -88,8 +88,16 @@ const GsiApi = (() => {
   }
 
   function resetDemoData() {
+    if (window.GsiConfig?.environment !== "local") return;
     Object.keys(initialData).forEach((resource) => save(resource, initialData[resource]));
   }
+
+  // Chaves de dados clinicos do prototipo - usadas exclusivamente em ambiente local/demo.
+  // Nunca devem conter dados reais de pacientes.
+  const PROTOTYPE_CLINICAL_KEYS = [
+    "pacientes", "prescricoes", "exames", "atendimentos",
+    "transferencias", "estoque", "chamadas",
+  ].map(key);
 
   // Futuro backend:
   // Trocar estas funcoes por chamadas fetch/REST ou GraphQL autenticadas.
@@ -105,8 +113,18 @@ const GsiApi = (() => {
         ensure(resource);
         mergeMissingSeed(resource);
       });
-    }
+    },
+    // Remove somente as chaves clinicas do prototipo. Nunca usa localStorage.clear().
+    // Preserva tokens de sessao Supabase e preferencias de interface (gsi_saude_perfil_operacional,
+    // gsi_saude_audio_chamada, gsi_saude_last_spoken_call_id).
+    purgePrototypeStorage() {
+      PROTOTYPE_CLINICAL_KEYS.forEach((k) => localStorage.removeItem(k));
+    },
   };
 })();
 
-GsiApi.seed();
+// Dados de demonstracao sao inicializados somente em ambiente local.
+// Em homologacao ou producao, o front-end deve obter dados exclusivamente via Supabase.
+if (window.GsiConfig?.environment === "local") {
+  GsiApi.seed();
+}
